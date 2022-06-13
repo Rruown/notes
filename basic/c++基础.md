@@ -1,6 +1,23 @@
-# 语言基础
+# 1. 语言基础
 
-## 关键字
+## 1.1 关键字
+
+### const与volatile
+
+#### **类型限定符**
+
+> const 定义类型为常量
+> volatile 定义类型为易变
+
+**const对象**——对象不能被修改。直接尝试修改对象内容，编译器对象。
+
+**volatile对象**——类型为 `volatile-`限定的对象，通过 `volatile`限定的类型的泛左值表达式的每次访问（读或写操作、成员函数调用等），都被当作对于优化而言是可见的副作用（即在单个执行线程内，`volatile`访问**不能被优化掉**)。数据或对象的操作会优化读取和存储，直接使用cache或寄存中的值。
+
+
+
+#### **限定成员函数**
+
+在有 cv 限定符的函数体内，`*this` 有同样的 cv 限定
 
 ### extern
 
@@ -43,6 +60,7 @@ int add() {
 **2. 静态局部变量**
 
 - 存放在静态区
+  
     > 静态区特性1：变量在运程序开始时分配内存，并且只存在一个
 - 局部变量，作用于函数内部
 
@@ -61,14 +79,7 @@ int add() {
 静态成员函数不关联到任何对象。调用时，它们没有 this 指针。
 静态成员函数的地址可以存储在常规的函数指针中，但不能存储在成员函数指针中。
 
-### cv(const与volatile)类型限定符
 
-> const 定义类型为常量
-> volatile 定义类型为易变
-
-**const对象**——类型为 `const-`限定的对象，或 const 对象的非 mutable 子对象。这种对象不能被修改
-
-**volatile对象**——类型为 `volatile-`限定的对象，通过 `volatile`限定的类型的泛左值表达式的每次访问（读或写操作、成员函数调用等），都被当作对于优化而言是可见的副作用（即在单个执行线程内，`volatile`访问**不能被优化掉**)。数据或对象的操作会优化读取和存储，直接使用cache或寄存中的值。
 
 ## 智能指针
 
@@ -192,7 +203,7 @@ void* memcpy(void* dest, void* src, size_t len) {
 
 ## 有了指针为什么还要引用？
 
-# 内存管理
+# 2. 内存管理
 
 ## 内存分配方式
 
@@ -215,11 +226,12 @@ void* memcpy(void* dest, void* src, size_t len) {
 - 共享库：位于堆和栈中间
 - **栈**
   
+
 **常量存储区** ：存放常量，不允许修改。
 
-# 1. 面向对象设计
+# 3. 面向对象设计
 
-## 1.1. 简介
+## 3.1. 简介
 
 **目标**
 
@@ -231,7 +243,7 @@ void* memcpy(void* dest, void* src, size_t len) {
   - 复合
   - 委托
 
-## 1.2. 头文件与类的声明
+## 3.2. 头文件与类的声明
 
 **1. 头文件的声明方式**
 
@@ -303,11 +315,11 @@ complex<double> c1(2.5, 1.5);
 complex<int> c2(2, 1);
 ```
 
-## 面向对象
+## 3.3 面向对象
 
 ### 构造函数
 
-**1。inline函数**
+**1. inline函数**
 
 成员函数默认都是**inline函数**，也可以自己用**inline**关键字定义
 
@@ -320,7 +332,7 @@ complex<int> c2(2, 1);
 ```c++
 class complex {
 public:
-    complex(double r= 0, double i = 0)
+    complex(double r = 0, double i = 0) // 参数默认值，其他函数也一样
         :re(r), im(i)//初值列：初始化
         {
             //re = i, im = i;
@@ -341,12 +353,29 @@ complex c2;
 complex *p = new complex(4);
 ```
 
-**一个变量的创建经历两个阶段**：
+**一个变量值的设定经历两个阶段**：
 
 - 初始化：初值列直接初始化。
 - 赋值
 
 **4. 函数重载**
+
+```c++
+class complex{
+public:
+	double real()  { return re;}
+    void real(double r) { re = r;}
+};
+```
+
+real函数编译后的实际名称可能是（取决于编译器）:
+
+```c++
+?real@Complex@@QBENXZ
+?real@Complex@@QAENABEN@Z
+```
+
+
 
 以下两种构造函数重复，1和2都是默认初始化的构造函数，编译器无法区别
 
@@ -363,11 +392,13 @@ complex():re(r), im(i){}
 - class::member
 - 全局作用域::
 
+------
+
 ### 参数传递和返回值
 
 **1. 常量成员函数**
 
-不改变数据内容的函数，加上**const**关键字
+**不改变数据内容的函数，加上const关键字**
 
 ```c++
 double real() const {return re;}
@@ -388,72 +419,53 @@ double real() const {return re;}
 - 引用传递(to const **不修改引用的内容**)
   - **参数传递尽量使用引用传递**
   - **返回值尽量使用引用**
-  - **传递者无需知道接受者是以什么形式接受**
+
+引用传递的一个好处在于**传递者无需知道接受者是以什么形式接受**
 
 ```c++
-inline complex&  _doapl(complex* this, const complex& r){//接受是引用类型
-    this->re += r.re;
-    this->im += r.im;
-    return *this;//返回的是value
-}
+void func_by_pointer(Complex *complex);
+void func_by_reference(Complex &complex);
+
+Complex complex();
+//对比于指针
+func_by_pointer(*complex);
+//对比于引用
+func_by_reference(complex);//无需关心接收的参数类型
 ```
 
 **3. 友元**
 
-友元可以自由取得friend的private成员，**比使用函数调用速度要快**——不需要类型检查和安全性检查等
+友元可以自由取得friend的private成员，**比使用函数调用速度要快——不需要类型检查和安全性检查等**
 
 定义在外部的函数或类，需要在类（可以是多个类）中声明
 
 ```c++
 class complex {
-public:
-    complex(double r= 0, double i = 0):re(r), im(i){}
-    complex& operator += (const complex&);/
-    double real() const {return re;}
-    double imag() const {return im;}
 private:
     double re, im;
-
     friend complex& __doapl(complex*, const complex &);
 };
 ```
 
 ```c++
-inline complex&  _doapl(complex* this, const complex& r){
+inline complex::complex&  _doapl(complex* this, const complex& r){
     this->re += r.re;
     this->im += r.im;
     return *this;
 }
 ```
 
-相同class和各个objects互为friends（友元）
+>  **注意**:
+>
+> - 友元关系不可以被继承
+> - 单向的
+> - 不具有传递性
 
-```c++
-class complex {
-public:
-    complex(double r= 0, double i = 0):re(r), im(i){}
-    complex& operator += (const complex&);/
-    double real() const {return re;}
-    double imag() const {return im;}
-    int func(const complex& param){//互为友元
-        return param.re + param.im;
-    }
-private:
-    double re, im;
 
-    friend complex& __doapl(complex*, const complex &);
-};
-```
-
-**注意点**：
-
-- 友元关系不可以被继承
-- 单向的
-- 不具有传递性
 
 ### 操作符重载
 
-*操作符就是一种函数，可以自定义*
+ 操作符就是一种函数，可以自定义
 
 **1. 成员函数**
 
@@ -539,7 +551,7 @@ operator << (ostream& os, const complex& x){//ostram每一次输入都改变os
 
 - **不可以将局部变量作为引用返回**， 局部变量在函数执行完毕后结束生命周期
 
-## 基于对象
+## 3.4. 基于对象
 
 ### 三大函数：拷贝构造，拷贝赋值，析构函数
 
@@ -597,7 +609,7 @@ inline String& operator=(const String &str){
 }
 ```
 
-### ～堆，栈与内存管理
+### 堆，栈与内存管理
 
 **栈**：存在于某作用域（scope）的一块内存空间。比如函数本身就会形成一个stack存放它接受的参数以及返回地址。
 **函数本体内声明的任何变量其所使用的内存都来自于stack**
@@ -669,7 +681,7 @@ Complex c4(1,3);
 **重点：array new 一定要搭配array delete**：
 array delete将调用n次析构函数，使用delete只会调用一次析构函数，从而造成内存泄露
 
-## 多重继承
+## 3.5. 多重继承
 
 ### 菱形继承
 
@@ -688,7 +700,7 @@ class A{};
 class B:virtual A{};
 ```
 
-## 补充知识
+## 3.6. 补充知识
 
 ### static
 
@@ -765,7 +777,7 @@ using std::cout;//使用声明
 std::cout
 ```
 
-## 类之间的关系
+## 3.7. 类之间的关系
 
 ### 复合(Composition——has a)
 
@@ -893,9 +905,9 @@ public:
 }
 ```
 
-# 2. C++ 程序设计兼谈对象模型
+# 4. C++ 程序设计兼谈对象模型
 
-## 2.1. 目标
+## 4.1. 目标
 
 - 泛型编程（template）
 - 深入继承关系所形成的对象模型：
@@ -1283,7 +1295,7 @@ public:
 
 *array new 动态分配时，size_t会用一个counter记录array大小*
 
-# 3. Effective C++
+# 5. Effective C++
 
 ## 1. 将C++视为语言联邦
 
@@ -1363,7 +1375,7 @@ STL 六大部件：
 
 `operator new()`和 `malloc`。内存分配最终都调用到 `malloc`,根据不同操作系统 `malloc`最终会使用不同的系统调用。`malloc`拿到的内存空间比申请的空间要大称为额外开销，具体细节看**内存管理**
 
-**总结：** `allocator`只是以 `::operator new`和 `::operator delete`完成 `allocate()`和 `deallocate()`
+> **总结：** `allocator`只是以 `::operator new`和 `::operator delete`完成 `allocate()`和 `deallocate()`
 
 G4.9的版本分配器默认使用的是 `alloctor`，G2.9较好的设计 `alloc`被命名为 `__pool_alloc`
 
