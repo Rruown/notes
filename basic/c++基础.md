@@ -11,7 +11,7 @@
 
 **const对象**——对象不能被修改。直接尝试修改对象内容，编译器报错。
 
-**volatile对象**——类型为 `volatile-`限定的对象，通过 `volatile`限定的类型的泛左值表达式的每次访问（读或写操作、成员函数调用等），都被当作对于优化而言是可见的副作用（即在单个执行线程内，`volatile`访问**不能被优化掉**)。数据或对象的操作会优化读取和存储，直接使用cache或寄存中的值。
+**volatile对象**——类型为 `volatile-`限定的对象，通过 `volatile`限定的类型的泛左值表达式的每次访问（读或写操作、成员函数调用等），都被当作对于优化而言是可见的副作用（即在单个执行线程内，volatile 访问不能被优化掉，或者与另一[按顺序早于](https://zh.cppreference.com/w/cpp/language/eval_order)或按顺序晚于该 volatile 访问的可见副作用进行重排序）
 
 
 
@@ -21,9 +21,19 @@
 
 ### extern
 
-**1. `extern C`** 在C++中，导入C函数的关键字是extern，表达形式为extern “C”， extern "C"的主要作用就是为了能够正确实现C++代码调用其他C语言代码。加上extern "C"后，会指示编译器这部分代码按C语言的进行编译，而不是C++的。
+**1. 语言链接**
 
-**2. 静态存储器和外部链接**
+> 提供以不同程序语言编写的模块间的链接。
+
+**基本语法**
+
+```c++
+extern 语言链接名 [声明, {声明序列}]
+```
+
+由于**C++支持函数重载，而C语言不支持**，因此函数被C++编译后在**`符号库`**中的函数签名是与C语言不同的；C++编译后的函数需要加上参数的类型才能唯一标定重载后的函数，而加上extern "C"后，是为了向编译器指明这段代码按照C语言的方式进行编译
+
+**2. 静态存储期和外部链接**
 
 extern关键字可以访问到其他翻译单元中的变量或函数，只需要在当前翻译单元声明即可
 
@@ -42,6 +52,26 @@ int add() {
 
 ```
 
+**3. 显示模板实例化声明（不常用）**
+
+```c++
+template<class T>
+struct Z // 模板定义
+{
+    void f() {}
+    void g(); // 永远不会定义
+};
+ 
+extern template struct Z<double>; // 显式实例化 Z<double>
+Z<int> a;                  // 隐式实例化 Z<int>
+Z<char>* p;                // 此处不实例化任何内容
+ 
+p->f(); // 隐式实例化 Z<char> 且 Z<char>::f() 在此出现。
+        // 始终不需要且不实例化 Z<char>::g()：不必对其进行定义
+```
+
+
+
 ### static
 
 > **静态存储期**和**内部链接**
@@ -50,7 +80,9 @@ int add() {
 
 内部链接:名字可从当前翻译单元（文件）中的所有作用域使用。在**命名空间作用域**声明的下列任何名字均具有内部链接。
 
-*简单来说，当前翻译单元就是内部链接名字的命名空间*
+**简单来说，当前翻译单元就是内部链接名字的命名空间**
+
+**在块作用域声明的下列任何名字均无链接**
 
 #### 面向过程中的static
 
@@ -203,13 +235,416 @@ void* memcpy(void* dest, void* src, size_t len) {
 
 ```
 
-## 有了指针为什么还要引用？
+
 
 ## 异常处理
 
 > 用异常和断言是避免程序错误
 
 # 2. 内存管理
+
+**c++内存管理工具：**
+
+|           分配           |            回收            |   类属    |            可否重载            |
+| :----------------------: | :------------------------: | :-------: | :----------------------------: |
+|          malloc          |            free            |   C函数   |              不可              |
+|           new            |           delete           | C++表达式 |              不可              |
+|     ::operator new()     |    ::operator delete()     |  C++函数  |               可               |
+| allocator<T>::allocate() | allocator<T>::deallocate() | C++标准库 | 可自由设计并以之搭配人任何容器 |
+
+
+
+## 2.1. 基本构建
+
+### `new`、`delete`表达式
+
+```c++
+MyClass *A = new MyClass(...);
+```
+
+**1. 表达式`new`可能会被编译器拆分为三步：**
+
+> 只有编译器才能像第三步一样调用构造函数，想直接调用ctor，可运行`placement new`
+
+```c++
+// 1. 调用::operator new
+void* ptr = ::operator new(sizeof(A));
+// 2. 类型转换
+MyClass *A = static_cast<MyClass*>(ptr);
+// 3. 调用构造函数
+A->MyClass::MyClass(...)
+```
+
+**VC6版的`::operator new`函数：**
+
+```c++
+void* operator new(size_t size) {
+    // try to malloc size bytes
+    void* p;
+    while ((p = malloc(size)) == 0) {
+        _TRY_BEGIN
+            if (_callnewh(size) == 0) break; // 自定义的函数，给应用机会释放不必要内存
+        _CATCH(std::bad_malloc)
+        _CATCH_END
+    }
+    return p;
+}
+```
+
+> 当`operator new`无法分配出申请的内存时，会抛出`std::bad_alloc`异常。在抛出异常之前会不止一次调用可由**用户指定的handler**
+
+handler的定义和使用方法如下
+
+```c++
+typedef void(*new_handler)();
+new_handler set_new_handler(new_handler p) throw();
+```
+
+设计良好的new handler应该做到两件事:
+
+- 释放更多的memory可用
+- 调用`abort()`或`exit()`
+
+**2. 表达式`delete`可能会被编译器拆解为两步：**
+
+```c++
+// (1) 先析构
+pc->~Complex(); // 
+// (2) 然后释放内存
+operator delete(pc) // 
+```
+
+### arry new/delete表达式
+
+> `arry new`只能使用默认的构造函数
+
+```c++
+MyClass *ptr = new MyClass[3]; // 调用3次ctor，只能使用默认的构造函数
+...
+delete[] ptr; // 调用3次dtor
+```
+
+**`malloc`分配内存**的时候带有**`cookie信息(cookie大小8字节)`**包括记录了分配几个对象等，`free`函数根据cookie信息去回收内存
+
+<img src="D:\mygit\notes\images\20220629164152.png" style="zoom:33%;" />
+
+#### 内存溢出的情况
+
+对于含有指针的类, **一次delete能够回收3个内存，但只调用了一次dtor**，会导致内存溢出
+
+```c++
+MyClass *ptr = new MyClass[3]; // 调用3次ctor
+...
+delete ptr; // 调用1次dtor，内存溢出
+```
+
+### `placement new`
+
+placement new 允许我们将object构建于allocated memory中
+
+```c++
+#include <new>
+char *buf = new char(sizeof(Complex) * 3);
+Complex* pc = new(buff)Complex(1,2);
+...
+delete[] buff;
+```
+
+编译器可能会将`new(buff)Complex(1,2)`拆解为：
+
+```c++
+// 1.
+void* ptr = operator new(sizeof (Complex), buff);
+// 2.
+pc = static_cast<Complex*>(ptr);
+// 3.
+pc->Complex(1,2);
+
+
+void* operator new(size_t, void* loc) {
+    return loc;
+}
+```
+
+### 重载基本构建
+
+#### 重载全局::operator new/delele`, `::operator new[]/delete[]`
+
+**注意**：这个影响很大
+
+```c++
+void* operator new (size_t size){
+    printf("my global new() \n");
+    return myMalloc(size);
+}
+void operator delete (void* ptr){
+    printf("my global delete() \n");
+    myFree(ptr);
+}
+void* operator new[] (size_t size){
+    printf("my global new[]() \n");
+    return myMalloc(size);
+}
+void operator delete[] (void* ptr){
+    printf("my global delete[]() \n");
+    myFree(ptr);
+}
+```
+
+#### 重载成员`operator new/delete`，`operator new[]/delte`
+
+```c++
+class Foo {
+  
+   void* operator new (size_t size){
+        printf("my member new() \n");
+        return myMalloc(size);
+    }
+    void operator delete (void* ptr){
+        printf("my member delete() \n");
+        myFree(ptr);
+    }
+    void* operator new[] (size_t size){
+        printf("my member new[]() \n");
+        return myMalloc(size);
+    }
+    void operator delete[] (void* ptr){
+        printf("my member delete[]() \n");
+        myFree(ptr);
+    }
+};
+```
+
+#### 重载`operator new()`/`delete()`
+
+> 重载多个class member operator new()，前提是每个版本的的声明**第一个参数必须是size_t**，其余参数以new所指定的placement argument为初值
+
+```c++
+class Foo {
+  	// (1)这个就是一般的operator new的重载
+    void* operator new (size_t size){
+        return myMalloc(size);
+    }
+    // (2)这个是标准库已提供的placement new()的重载
+	void* operator new (size_t size, void* buffer) {
+        return buffer;
+    }
+    // (3)新的placement new
+    void* operator new (size_t size, long extra) {
+        return malloc(size + extra);
+    }
+};
+```
+
+可以这么理解：使用`new`**表达式**时编译器会调用`operator new`，第一个参数会被自动绑定为类的大小，其余参数相当于重载，**placement new看作是operator new的重载别名**。
+
+**我们也可以重写`placement delete`，但是只有构造对象的时候抛出异常，才会调用相应的`delete`动作**。主要是为了避免内存分配好后，构造对象失败后可以回收已经分配的内存。
+
+## 2.2. 内存池设计
+
+每次申请一次内存，都需要调用一次malloc并且malloc的内存块带有**cookie信息**。如果**一次性申请一大块内存**，可以**降低调用malloc的次数**的同时，也会**减少cookie信息**的消耗。即内存池设计的目的：**提高速度和节约内存**
+
+### pre-class allocator
+
+> union很好的复用了对象空间，即将其作为freelist上的对象指针，又作为使用的对象。
+
+**基本思路**：重写`operator new`一次性申请一大块内存，并用free list管理内存。operator delete删除的对象重新回收加入到free list中
+
+```c++
+class Airplane {
+private:
+    struct AirplaneRep{
+        unsigned long miles;
+        char types;
+    };
+private:
+    union {
+        AirplaneRep rep; // 使用的对象
+        Airplane* next; // free list上的对象指针
+    };
+private:
+    static Airplane* headOfFreeList;
+    static const int BLOCK_SIZE;
+public:
+    void* operator new(size_t size) {
+        Airplane* p = headOfFreeList;
+        if (p) {
+            headOfFreeList = p->next;
+        }
+        else {
+            Airplane* newBlock = static_cast<Airplane*>
+            (::operator new(BLOCK_SIZE * sizeof (Airplane)));
+            // 将一大块串成一个free list
+            // 跳过0，因此它被传回做本次结果
+            for (int i = 1; i < BLOCK_SIZE - 1; ++ i) {
+                newBlock[i].next = &newBlock[i + 1];
+            }
+            newBlock[BLOCK_SIZE - 1].next = 0;
+            p = newBlock;
+            headOfFreeList = &newBlock[1];
+        }
+        return p;
+    }
+    // 将回收的对象重新插入到free list
+    void operator delete(void* deadObject) {
+        if (deadObject == 0) return;
+        Airplane* carcass = static_cast<Airplane*>(deadObject);
+        carcass->next = headOfFreeList;
+        headOfFreeList = carcass;
+    }
+
+
+};
+```
+
+### static allocator
+
+前一个方法要为不同的类重写近乎一样的`member operator new`和`member operator delete`。static allocator将memory allocator的概念包装起来，更加容易使用
+
+```c++
+class allocator{
+private:
+    struct obj{
+      struct obj* next;  
+    };
+private:
+    obj* freeStore = nullptr;
+    const int CHUNK = 20; // 标准库默认的是20
+public:
+    void* allocate(size_t size) {
+        obj* p;
+        if (!p){
+            size_t chunk = size * CHUNK;
+            freeStore = p = (obj*)malloc(chunk);
+        
+            // 将一大块串成一个free list
+            // 跳过0，因此它被传回做本次结果
+            for (int i = 01; i < CHUNK - 1; ++ i) {
+                p->next = (obj*)(char*(p) + size);
+                p = p->next;
+            }
+            p->next = nullptr;
+        }
+        p = freeStore;
+        freeStore = freeStore->next;
+        return p;
+    }
+    // 将回收的对象重新插入到free list
+    void deallocate(void* p, size_t size) {
+    	((obj*)p)->next = freeStore;
+        freeStore = (obj*)p;
+    } 
+};
+```
+
+其他类比如Foo使用效果如下:
+
+```c++
+class Foo {
+public:
+    long l;
+    string str;
+    int i;
+	static allocator myAlloc;
+public:
+    void* operator new (size_t size) {
+        return myAlloc.allocate(size);
+    }
+    void operator delete(void* p, size_t size) {
+        myAlloc.deallocate(p, size);
+    }
+};
+```
+
+### macro for static allocator
+
+为static allocator设计宏定义，为了更加方便地使用
+
+```c++
+#define DECLARE_POOL_ALLOCATOR()
+public:
+void* operator new (size_t size) {
+        return myAlloc.allocate(size);
+}
+void operator delete(void* p, size_t size) {
+    myAlloc.deallocate(p, size);
+}
+protected:
+static allocator myAlloc;
+
+#define IMPLEMENT_POOL_ALLOC(class_name)
+allocator::class_name::myAlloc;
+```
+
+在类中的使用如下
+
+```c++
+class Foo {
+  	DECLARE_POOL_ALLOCATOR()  
+public:
+    long l;
+    string str;
+    int i;
+	static allocator myAlloc;
+
+};
+IMPLEMENT_POOL_ALLOC(Foo)
+```
+
+## 2.3. 标准库分配器
+
+#### VC6标准分配器实现
+
+VC6的分配器实现只是将operator new和operator delete封装在allocate和deallocate下，其他什么都没有做
+
+```c++
+template<typename _Ty>
+class allocator {
+public:
+    typedef _Ty* pointer;
+public:
+    pointer allocate(size_t _N, const void*) {
+        return (_Allocate((diiference_type)_N, (pointer)0);
+    }
+    void deallocate(void _FARQ *_p, size_t){
+        operator delete(_p);
+    }
+};
+
+                
+template<typename _Ty>
+_FARQ* _allocate(...) {
+    return operator new (_N * sizeof (_Ty));
+}
+```
+
+### G2.9标准分配器实现
+
+G2.9的allocator只是以`::operator new`和`::operator delete`完成`allocate()`和`deallocate()`
+
+### G4.9标准分配器实现
+
+G4.9的allocator只是以`::operator new`和`::operator delete`完成`allocate()`和`deallocate()`，没有特殊设计
+
+### G2.9 std_alloc运行模式
+
+<img src="D:\mygit\notes\images\20220703165436.png" style="zoom: 67%;" />
+
+free List是一个16个大小的数组，记录从$8\sim16\times8$个字节freeList
+
+申请x字节（不是8的倍数会对齐）：
+
+- 从x字节对应的free List中取一块数据返回。
+- 如果free List为空，则从pool（战备池）中取$x\times\{1...20\}$（至少要能取出一个，最多取20个）返回一块数据，其余挂在free List。
+- 如果战备池也不够的话，先做战备池的**碎片处理**（剩下多少就放到哪个freelist中），然后调用`malloc`函数申请$x\times20\times2+ RoundUp(已申请的内存大小>> 4)$大小的空间，一半当作战备池，一半挂在free List。
+
+总结：顺序：free List->战备池->malloc
+
+**申请失败**：从第一个大的freeList中取一块数据返回
+
+## 2.4. malloc/free
+
+
 
 ## 内存分配方式
 
@@ -692,16 +1127,6 @@ Complex c4(1,3);
 **重点：array new 一定要搭配array delete**：
 array delete将调用n次析构函数，使用delete只会调用一次析构函数，从而造成内存泄露
 
-## 3.5. 多重继承
-
-### 菱形继承
-
-多继承时很容易产生命名冲突，即使我们很小心地将所有类中的成员变量和成员函数都命名为不同的名字，命名冲突依然有可能发生, 如下：
-
-![](../images/20220327135621.png)
-
-这时类D中的有两份的类A的成员变量， 一个是类B的A的成员变量，另一个是类C中A的成员变量。
-
 ### 虚继承
 
 为了解决多继承时的命名冲突和冗余数据问题，C++ 提出了虚继承，使得在派生类中只保留一份间接基类的成员。
@@ -739,24 +1164,7 @@ double Account::set_rate(5.0);//定义
 - 通过对象调用
 - 通过类调用
 
----
 
-**单例模式**
-
-```C++
-class A{
-public :
-    static A& getInstance();
-private:
-    A();
-    A(const A&ths);
-};
-inline A::getInstance(){
-    static A a;//只要有人调用a就会一直存在
-
-    return a;
-}
-```
 
 ### 类模板
 
@@ -1038,7 +1446,6 @@ private:
 
 > 从面向对象编程的角度看，智能指针的设计是面向对象的**复合关系**，内部含有一个指针并重写了`*`和`->`
 >
-> 从模板编程的角度看，智能指针的设计是类模板
 
 `->`操作符使用后可以被一直使用下去
 
@@ -1119,14 +1526,14 @@ struct pair{
 
 锁定模板泛化的某一typename/class
 
-*泛化-full specialization*
+**泛化-full specialization**
 
 ```c++
 template<class Key>
 struct hash{};
 ```
 
-*特化*
+**特化**
 
 ```c++
 template<>
@@ -1171,7 +1578,7 @@ class C<U*>{
 }
 ```
 
-**5. tempalte template parameter.模板模板参数**
+**5. template template parameter.模板模板参数**
 
 参数模板参数本身是一个模板
 
@@ -1186,9 +1593,9 @@ public:
 }
 ```
 
-## 三个主题
+## 4.6. 三个主题
 
-**重要！！ variadic templates.模板参数可变**
+> **variadic templates.模板参数可变**
 
 ``...``就是一个所谓的pack包
 用于模板参数就是模板参数包
@@ -1213,19 +1620,33 @@ size...获取包的大小
 
 ``size...of(args)``
 
-## reference.引用
+### reference.引用
 
-**注意：**
+object对象和它reference的大小相同且地址也相同（ 逻辑上是，物理上不是）
 
-- object和其reference的大小相同且地址也相同（逻辑上是，物理上不是）
-- 引用不是签名的一部分
+```c++
+MyClass a; // MyClass的对象
+MyClass &alias_a = a; // 对象的引用
+
+// 逻辑上a和alias_a代表的是一个对象
+// 但实现上alias_a是一个指针
+sizeof (a) == sizeof (&alias_a) 
+&a == &alias_a					
+```
+
+> 指针与引用的区别：
+>
+> - 引用是指对象的别名，代表原对象，它表现得形式与对象一致；但是指针是指向对象的地址
+> - 引用无法重新指向其他对象；指针可以，容易出现空指针的现象
+>
+> `引用不算作函数签名`
 
 **好处**：
 
 - 避免一些复制不可复制的对象
 - 参数使用引用时， 调用端接口相同
 
-## 对象模型：vptr和vtbl.概念
+### 对象模型：vptr和vtbl
 
 **虚函数是面向对象最重要的部分**
 
@@ -1249,7 +1670,7 @@ vpt指向vtbl，vtbl存放虚函数的指针
   - 指针向上转型（将派生类基类的部分赋值给基类）
   - 调用虚函数
 
-## 对象模型：this.概念
+### 对象模型：this.概念
 
 **虚函数两种用法**：
 
@@ -1285,96 +1706,47 @@ int main(){
 
 **虚函数的实现与抽象函数实现基本类似，派生类调用非虚函数时实际上调用的是父类的非虚函数， 而派生类实现了父类的虚函数时，调用的则是自己的虚函数——动态绑定实现**
 
-## New 与 Delete的重载—内存池设计
-
-`new/delete`与`malloc/free`**区别**：
-
-- `new/delete`是关键字， `malloc/free`是函数
-- `new`根据类型自动分配内存，`malloc`需要指定申请大小
-- `new`申请的内存是自动存储区，`malloc`申请的内存在堆空间
-- `new`返回的类型是**对象指针**，`malloc`返回`void*`
-- `new`分配失败时抛出异常,`malloc`分配失败时返回`NULL`
-
-使用的new与delete是**表达式**，**不可以改变**，但是分解下来的new()函数可以重载
-
-```c++
-Foo* p = new Foo(); 
----> 1. void * mem = operator new(sizeof(Foo))//内部调用malloc为Foo对象分配内存空间
----> 2. p = static_cast<Foo*>(mem);
----> 3. p->Foo::Foo();//调用构造函数，初始化对象
-
-delete p;
----> 1. p->~Foo();//调用对象的析构函数，比如释放指针占用的内存
----> 2. operator delete(p);//内部调用free函数 释放对象占用的内存
-```
-
-### new、delete全局重载
-
-```c++
-void* myAlloc(size_t size){return malloc(size);}
-void myFree(void* ptr){return free(ptr);}
-```
-
-```c++
-inline void* operator new(size_t size) return {cout << "..."; return myAlloc(size);}
-inline void* operator new[](size_t size) return {cout << "..."; return myAlloc(size);}
-inline void operator delete(void* ptr){myFree(ptr);}
-inline void operator delete[](void* ptr){myFree(ptr);}
-```
-
-### 类成员重载new 、delete
-
-c++允许重载类成员operator new() 多个版本，每个版本的声明都必须有一个独特的参数列, **第一个参数**必须是 `size_t`（函数签名唯一）
-
-```c++
-class Foo{
-public:
-    void* operator new(size_t);//这是一般标准的重载
-    void* operator new(size_t, void* start)//标准库提供的placement new()的重载
-    void operator delelte(void, size_t可选);
-  
-}
-```
-
-*array new 动态分配时，size_t会用一个counter记录array大小*
-
 # 5. Effective C++
 
-## 1. 将C++视为语言联邦
+## 5.1. 让自己习惯C++
+
+### 01. 将C++视为语言联邦
 
 - C
 - 面向对象
 - STL
 - 泛型编程
 
-## 2. 使用 `const`或 `enum`和 `inline`代替 `define`（宏定义）
+### 02. 尽量以`const`、`enum`和 `inline`代替 `#define`
 
-## 3.尽可能使用 `const`
+### 03.尽可能使用`const`
 
 - 帮助编译器侦查错误
-- 尽量避免 `const`版本与 `non-const`版本的重复, 必须用其中一个调用另一个
+- 尽量避免`const`版本与`non-const`版本的重复, 令`non-cast`版调用`const`版避免代码重复
 
-## 4.尽量在对象使用前确定已被初始化
+### 04.尽量在对象使用前确定已被初始化
 
 - 内置类型尽量手动初始化
 - 构造函数用初值列初始化（按照声明顺序）
-- 用 `local static`对象替换 `non-local static`对象
+- 为免除“跨编译单元之初始化次序”问题，用`local static`对象替换 `non-local static`对象
 
-## 面向对象
+## 5.2. 析构/构造/赋值
 
-### 5. 了解c++编译器默认生成版的函数
+### 05. 了解c++编译器默认生成版的函数
 
 - 编辑器可以暗自为class创建`default`构造函数、`copy`构造函数、`copy assignment`操作符以及析构函数
   
-### 6. 如果不想使用编辑器自动生成的函数，就将其声明为`private`
+### 06. 如果不想使用编辑器自动生成的函数，就该明确拒绝
 
-### 7. 为多态基类声明`virtual`析构函数
+- 可将成员其声明为`private`，或者`=delete`
 
-### 8. 析构函数绝对不要吐出异常
+### 07. 为多态基类声明`virtual`析构函数
 
-### 9. 在构造和析构期间不要调用`virtual`函数
+### 08. 析构函数绝对不要吐出异常
 
-- 这种调用从不会下降至derived class
+### 09. 绝不在构造和析构期间调用`virtual`函数
+
+- 因为这种调用从不会下降至derived class
 
 ### 10. 令`operator =`返回一个`reference to *this`
 
@@ -1383,12 +1755,99 @@ public:
 - 判断“证同”
 - `copy and swap`
 
-### 12. `copying`函数勿忘记每一个成份
+### 12. 赋值对象时勿忘记每一个成份
 
-- 所有成员变量
-- **`base class`的成份**
+- copying函数应该确保复制“对象内所有成员变量”及“所有base class 成分”
 
-# STL—体系结构与内核分析
+## 5.3. 资源管理
+
+### 13. 以对象管理资源
+
+- 为防止资源泄漏，请使用**RAII对象**，它们在**构造函数中获得资源**并在**析构函数中释放资源**。
+- 两个常被使用的RAII class分别是**shared_ptr**和aut_ptr。**前者通常是较佳选择**，因为其copy行为比较直观
+
+### 14. 在资源管理中小心copying行为
+
+- 复制RAII对象必须一并复制它所管理的资源，所以资源的copying行为决定RAII对象的copying行为
+-  普通而常见的RAII class copying行为是：抑制copying、施行引用计数法（reference counting）。不过其他行为也都可能被实现
+
+### 15. 在资源管理类中提供对原始资源的访问
+
+-  API 往往要求访问原始资源（raw resources），所以每个RAII class应该提供一个“取得其所管理之资源”的办法。
+
+### 16. 成对使用`new`和`delete`时要采用相同形式
+
+- (new, delete), (new[], delete[])
+
+### 17. 以独立语句将newed对象置入智能指针
+
+- 以独立语句将newed对象存储于（置入）智能指针内，一旦异常被抛出，有可能导致难以察觉的资源泄漏。
+
+## 5.4. 设计与声明
+
+### 18. 让接口容易被正确使用，不易被误用
+
+-  “促进正确使用”的办法包括**接口的一致性**，以及与**内存类型的行为兼容**。
+- “阻止误用”的办法包括**建立新类型**、**限制类型上的操作**，**束缚对象值**，以及**消除客户的资源管理责任**。
+- shared_ptr支持定制型删除器。这可防范DLL问题，可被用来自动解除互斥锁等等。
+
+### 19. 设计class犹如设计type
+
+- class的设计就是type的设计。在定义一个新的type之前，请确定你已经考虑过本条款覆盖的所有讨论主题。
+
+### 20. 宁以pass-by-reference-to-const替换pass-by-value
+
+- 尽量以pass-by-reference-to-const 替换 pass-by-value。前者通常比较高效，并可避免切割问题。
+- 以上规则并不适用于内置类型，以及STL的迭代器和函数对象。对它们而言pass-by-value往往比较适当。
+
+### 21. 必须返回对象时，别妄想返回其引用
+
+-  绝不要返回pointer或reference指向一个**local stack对象（临时对象）**，或返回一个heap-allocated（已分配堆）对象，或返回pointer或reference指向一个local static对象而有可能同时需要多个这样的对象。
+
+### 22. 将成员变量声明为private
+
+- protected并不比public更具有封装性，只有private提供封装。
+
+### 23. 宁以non-member、non-friend替换member函数
+
+- 宁可拿non-member、non-friend 函数替换member函数。这样做可以增加封装性、包裹弹性和机能扩充性。
+- 将所有便利函数放在多个头文件内但隶属同一个命名空间（namespace），这是C++标准程序库的组织方式。
+
+### 24. 如果所有参数都需要类型转换，请为此采用non-member函数
+
+- 如果你需要为某个函数的所有参数（包括被this指针所指的那个隐喻参数）进行类型转换（例如：实现operator*交换律），那么这个函数必须是个non-member。
+
+### 25. 考虑写出一个不抛出异常的swap函数
+
+- 当`std::swap`对你的类型效率不高时，提供一个**swap成员函数**，并确定这个函数不抛出异常。
+- 如果你提供一个`member swap`，也该提供一个`non-member swap`用来调用前者，对于class（而非template），也请特化std::swap。
+- 调用swap时应针对std::swap使用using声明式，然后调用swap并且不带任何“命名空间资格修饰”。
+-  为“用户定义类型”进行std template全特化是好的，但千万不要尝试在std内加入某些对std而言全新的东西。
+
+## 5.5. 实现
+
+### 26. 尽可能延后变量定义式的出现时间
+
+- 尽可能延后变量定义式的出现，这样可以增加程序的清晰度并改善程序效率。
+
+### 27. 尽量少做转型动作
+
+- 如果可以，尽量避免转型，特别是在注重效率的代码中避免dynamic_cast。如果有个设计需要转型动作，试着发展无需转型的替代设计。
+- **如果转型是必要的，试着将它隐藏于某个函数背后**。客户随后可以调用该函数，而不需要将转型放进他们自己的代码中。
+- 宁可使用C++style（新式）转型，不要使用旧式转型。前者很容易辨识出来，而且也比较有着分门别类的职掌。
+
+### 28. 避免返回handle指向对象内部成分
+
+- 避免返回handle（用来取得某个对象，包括reference、指针、迭代器）指向对象内部。遵守这个条款可增加封装性，帮助const成员函数的行为像个const，并将发生“虚吊号码牌”的可能性降至最低。
+
+### 29. 为“异常安全”而努力是值得的
+
+### 30. 透彻了解inline的里里外外
+
+- 将大多数inline限制在小型、被频繁调用的函数身上。这可使日后的调试过程和二进制升级更容易，也可使潜在的代码膨胀问题最小化，使程序的速度提升机会最大化。
+- 不要只因为function template出现在头文件，就将它们声明为inline。
+
+# 6. STL—体系结构与内核分析
 
 ## 1. 目标
 
@@ -1408,13 +1867,15 @@ STL 六大部件：
 - 适配器
 - 仿函数
 
-**STL容器：采用 `前闭后开`区间**
+
+
+**STL容器：采用`前闭后开`区间**
 
 **容器间的关系与分类**: 缩进代表复合关系
 
 ![](../images/211123.png)
 
-## 分配器
+## 3. 分配器
 
 `operator new()`和 `malloc`。内存分配最终都调用到 `malloc`,根据不同操作系统 `malloc`最终会使用不同的系统调用。`malloc`拿到的内存空间比申请的空间要大称为额外开销，具体细节看**内存管理**
 
@@ -1422,35 +1883,7 @@ STL 六大部件：
 
 G4.9的版本分配器默认使用的是 `alloctor`，G2.9较好的设计 `alloc`被命名为 `__pool_alloc`
 
-## Iterator Traits
-
-### Iterator需要遵循的原则
-
-迭代器是算法和迭代器之间的**桥梁**,帮助做算法设计
-
-![](../images/20211125_143335.png)
-
-*算法提问的方式*
-
-```c++
-void algorithm(I first, I end){
-    I::iterator_category;
-    I::value_type;
-    ...
-}
-```
-
-**迭代器必须要提供五种关联的type**, 全部都是 `typedef`的
-
-- `iterator_category`
-- `value_type`
-- `pointer`
-- `reference`
-- `difference_type`
-
-**迭代器是一种泛化的指针，native 指针应该也是一个迭代器，但是native 指针无法根据上述内容回答算法的问题**
-
-## 容器
+## 4. 容器
 
 > 均按照handle-body的设计思想
 
@@ -1467,55 +1900,7 @@ void algorithm(I first, I end){
   - map/mutimap
 - unordered（无序关联） 容器
 
-### Traits 特性
-
-traits机器必须要有能力分辨它所获得 `iiterator`是 `class iterator T`还是 `native pointer to T`。利用**偏特化**可以达到目的
-
-**加一个中间层即可解决**
-
-```c++
-template<class I>
-struct iterator_traits{
-    typedef typename I::iterator_category iterator_category;
-    typedef typename I::value_type value_type;
-    typedef typename I::pointer pointer;
-    typedef typename I::reference reference;
-    typedef typename I::difference_type difference_type;
-    ...
-}
-```
-
-偏特化
-
-```c++
-template<class T>
-struct iterator_traits<T*>{
-    typedef random_access_iterator_tag iterator_category;
-    typedef T value_type;
-    typedef T* pointer;
-    typedef T& reference;
-    typedef ptrdiff_t difference_type;
-
-}
-template<class T>
-struct iterator_traits<const T*>{
-    typedef random_access_iterator_tag iterator_category;
-    typedef T value_type;
-    typedef T* pointer;
-    typedef T& reference;
-    typedef ptrdiff_t difference_type;
-}
-```
-
-```c++
-template<typename I,...>
-void algorithm(...){
-    iterator_traits<I>::value_type v1;
-    ...
-}
-```
-
-### list
+#### list
 
 > 最有代表性
 
@@ -1574,7 +1959,7 @@ protected:
 };
 ```
 
-### vector
+#### vector
 
 按照GNU2.9设计实现vector
 
@@ -1667,17 +2052,17 @@ void vector<T>::insert_aux(iterator position, const T& x) {
 
 ![](../images/20211125_135732.png)
 
-### array
+#### array
 
 **TR1**技术报告1
 
 > 没有构造函数与析构函数
 
-### forward_list
+#### forward_list
 
 ![](../images/20211202_192841.png)
 
-### deque
+#### deque
 
 **逻辑**上是一个双端可入的数组
 
@@ -1796,7 +2181,7 @@ reference  operator*() const{return *cur;}
 
 **当map满了以后，会将其复制到新空间的中间，以让其前插入**
 
-### 红黑树
+#### 红黑树
 
 红黑树是一种平衡二插树
 
@@ -1840,7 +2225,7 @@ struct identity:public unary_function<T,T>{
 }
 ```
 
-### set与multiset
+#### set与multiset
 
 set/multiset以rb_tree为底层结构，因此有元素自动排序特性。
 
@@ -1863,7 +2248,7 @@ private:
 };
 ```
 
-### map与multimap
+#### map与multimap
 
 map/multimap以rb_tree为底层结构，因此有元素自动排序特性
 
@@ -1891,19 +2276,95 @@ public:
 };
 ```
 
-### hashtable
+#### hashtable
 
 **实现方式**：“拉链法”
 
 当插入的元素数量超过 `buckets vector`的大小，增加容量，需要**rehashing**
 
-### unordered_*
+#### unordered_*
 
-## 体系结构与内核分析
+## 5. 迭代器与算法
+
+### Iterator Traits
+
+#### **Iterator需要遵循的原则**
+
+迭代器是算法和容器之间的**桥梁**，帮助做算法设计
+
+<img src="../images/20211125_143335.png" style="zoom: 50%;" />
+
+**算法提问的方式**
+
+```c++
+void algorithm(I first, I end){
+    I::iterator_category;
+    I::value_type;
+    ...
+}
+```
+
+**迭代器必须要提供五种关联的type**, 全部都是`typedef`的
+
+- `iterator_category`
+- `value_type`
+- `pointer`
+- `reference`
+- `difference_type`
+
+> **迭代器是一种泛化的指针，native指针应该也是一个迭代器，但是native指针无法根据上述内容回答算法的问题**
+
+#### Iterator or native pointer
+
+traits机器必须要有能力分辨它所获得`iterator`是 `class iterator T`还是 `native pointer to T`。利用**偏特化**可以达到目的
+
+**加一个中间层即可解决**
+
+```c++
+template<class I>
+struct iterator_traits{
+    typedef typename I::iterator_category iterator_category;
+    typedef typename I::value_type value_type;
+    typedef typename I::pointer pointer;
+    typedef typename I::reference reference;
+    typedef typename I::difference_type difference_type;
+    ...
+}
+```
+
+**偏特化：**
+
+```c++
+template<class T>
+struct iterator_traits<T*>{
+    typedef random_access_iterator_tag iterator_category;
+    typedef T value_type;
+    typedef T* pointer;
+    typedef T& reference;
+    typedef ptrdiff_t difference_type;
+
+}
+template<class T>
+struct iterator_traits<const T*>{
+    typedef random_access_iterator_tag iterator_category;
+    typedef T value_type;
+    typedef T* pointer;
+    typedef T& reference;
+    typedef ptrdiff_t difference_type;
+}
+```
+
+```c++
+template<typename I,...>
+void algorithm(...){
+    iterator_traits<I>::value_type v1;
+    ...
+}
+```
 
 ### 迭代器分类
 
-![1640054969566.png](../images/1640054969566.png)
+<img src="../images/1640054969566.png" alt="1640054969566.png" style="zoom:50%;" />
 
 ```c++
 //五种迭代器类别
@@ -1914,7 +2375,7 @@ struct bidirectional_iterator_tag:forward_iterator_tag{};
 struct random_access_iterator_tag:bidirectional_iterator_tag{};
 ```
 
-为什么不用 `枚举`表示
+为什么不用`枚举`表示
 
 ```c++
 void _display(random_access_iterator_tag){...}
@@ -1931,6 +2392,8 @@ void display_category(I itr){
 ```
 
 ### 迭代器对算法的影响
+
+> 注意 `difference_type`不能随便地写成整数
 
 算法通过“询问”迭代器，对不同的迭代器种类分开设计算法
 
@@ -1961,7 +2424,12 @@ __distance(InputIterator first, InputIterator last,
 }
 ```
 
-*注意 `difference_type`不能随便地写成整数*
+> 静态多态: 编译器在**编译期间完成的**，编译器会根据实参类型来选择调用合适的函数
+>
+> 主要发生在:
+>
+> - 函数重载
+> - 模板函数
 
 ```c++
 template<class Iterator>
@@ -1992,8 +2460,6 @@ inline void __advance(RandomAccessIterator &i, Distance n,
 
 面向对象中，`farword_iterator`类型is a `input_iterator`，最终会调用`__advance(InputIterator,n)`
 
-> 操作符重载与多态（效果一样？？）
-
 ### 算法源码中对`iterator_category`的“暗示”
 
 语法上不支持模板函数只接受特定类
@@ -2006,6 +2472,8 @@ inline void __advance(RandomAccessIterator &i, Distance n,
 
 **蓝色的binary_op被称为`callable entity`（可被调用的实体），传进去任何东西只要能被小括号作用起来就可以**
 
+> `callable entity`如果不是仿函数的话，就只能作用于函数模板中
+
 ```c++
 template<class InputIterator, class T>
 T accumulate(InputIterator first, InputIterator last, T init){
@@ -2017,8 +2485,8 @@ T accumulate(InputIterator first, InputIterator last, T init){
 
 template<class InputIterator, 
         class T，
-        BinarayOperation binary_op>
-T accumulate(InputIterator first, InputIterator last, T init){
+        class BinaryOperation>
+T accumulate(InputIterator first, InputIterator last, T init, BinaryOperation op){
     for (; first != last; ++ first) {
         init = binary_op(init, *first);
     }
@@ -2081,14 +2549,14 @@ InputIterator find(InputIterator first,
 }
 ```
 
-### functors仿函数
+## 6. 仿函数
 
 算术类
 
 ```c++
 template<class T>
 struct plus:public binary_function<T,T>{
-    T operator()(const T&x, const T& y){return x + y;}
+    T operator()(const T&x, const T& y){ return x + y; }
 }
 ```
 
@@ -2216,9 +2684,9 @@ public:
 
 ![](../images/20220104140014.png)
 
-## 架构与源码
 
-### Type Traits
+
+## 7. Type Traits
 
 c++ 11 type traits
 ![](../images/20220121112243.png)
@@ -2283,7 +2751,769 @@ struct remove_cv{
 
 
 
-# 6. 底层原理
+# 7. 新特性
+
+## 四种类型转换
+
+### static_cast
+
+```c++
+//基础数据类型之间的转换
+int a = 65;
+char ch = static_cast<char>(a);
+cout << ch;//A
+
+class Base{
+    virutal test();
+};
+class Derived : Base{
+    virtual test();
+};
+Derived *d = new Drived();
+Base *b = static_cast<Base*>(d);
+
+//父类和子类之间的转换，子类转父类是安全的，父类转子类是不安全的
+```
+
+类似与C语言的强制类型转换，可以用在基础数据类型之间的转换和父类和子类之间的转换 父类指针和子类指针之间的转换最好使用dynamic_cast.
+
+### dynamic_cast
+
+用于含有虚函数的类之间向上、向下和侧向之间的转换
+
+```c++
+Base* pb = new Sub();
+Sub* ps1 = static_cast<Sub*>(pb);  //子类->父类，静态类型转换，正确但不推荐
+Sub* ps2 = dynamic_cast<Sub*>(pb); //子类->父类，动态类型转换，正确
+
+Base* pb2 = new Base();
+Sub* ps21 = static_cast<Sub*>(pb2); //父类->子类，静态类型转换，危险！访问子类_name成员越界
+Sub* ps22 = dynamic_cast<Sub*>(pb2);//父类->子类，动态类型转换，安全，但结果为NULL 
+```
+
+### const_cast
+
+const_cast的作用就是将**常量指针转换为普通的指针**
+
+### reinterpret_cast
+
+`重新解释`，几乎什么都能转，但是可能会出问题。
+
+## Variadic Templates.可变参数模板
+
+> 变化的是：1.参数的个数。2.参数的类型
+
+`...`就是一个pack(包)
+用于模板参数就是模板参数包
+用于函数参数类型就是函数参数类型包
+用于函数参数就是函数参数包
+
+`sizeof...(args)`获得参数数量
+数量不定的模板参数
+
+**`...`语法用在如下三个地方：**
+
+```c++
+template<typename T, typename... Types> // 1
+void print(const T& firstArg, const Types&... args){ // 2
+    cout << firstArg << endl;
+    print(args...); // 3
+}
+```
+
+### 递归函数调用
+
+入口函数
+
+```c++
+template<typename... Types>
+inline size_t hash_val(const Types&... args){
+    size_t seed = 0;
+    hash_val(seed, args...);
+    return seed;
+}
+```
+
+递归函数
+
+```c++
+template<typename T, typename... Types>
+inline void hash_val(size_t& seed, const T& val, const Types&... args){
+    hash_combine(seed, val);
+    hash_val(seed, args...);
+}
+```
+
+出口函数
+
+```c++
+template<typename T>
+inline void hash_val(size_t& seed, const T& val){
+    hash_combine(seed, val);
+}
+```
+
+**从入口函数进入，通过递归函数对参数包解包直到调用到出口函数为止**
+
+### 递归继承.Tuple
+
+```c++
+template<typename... Values> class tuple;//泛化模板
+template<> class tuple<> {};//出口
+
+template<typename Head, typename... Tail>
+class tuple<Head, Tail...>
+    :private tuple<Tail...>
+{
+    typedef tuple<Tail...> inherited;
+public:
+    tuple(){}
+    tuple(Head v, Tail... vtail)
+        :m_head(v), inherited(vtail...){}
+    
+    typename Head::type head() { return m_head;}
+    inherited& tail() {return *this;}
+        
+protected:
+    Head m_head;
+}
+```
+
+### 示例1
+
+> 实现一个打印函数`print`：将任意类型任意个参数打印出来
+
+递归主体实现如下：
+
+
+```c++
+template<typename &T, typename... Types>
+void printX(const T& firstArg, const Types&... args) {
+	cout << firstArg << endl;    
+    printX(args...);
+}
+```
+
+递归出口如下：
+
+```c++
+void printX(){}
+```
+
+
+
+```c++
+printX(7.5, "hello", 1) // 输出: 7.5 hello 1
+```
+
+### 示列2
+
+> 实现一个printf("%d..", ..)格式化输出函数
+
+### 示列4
+
+> 标准库`std::maximum`函数
+
+递归主体：
+
+```c++
+template<tyename... Args>
+int maximum(int n, Args... &args) {
+    return std::max(n, maximum(args))
+}
+```
+
+递归出口:
+
+```c++
+int maximum(int n) {
+    return n;
+}
+```
+
+### 示例5
+
+> 以异于一般的方式处理first元素和last元素
+
+```c++
+cout << make_tuple(7.5, string("hello"), 42);
+// 期望运行结果: [7.5, hello, 42]
+```
+
+入口：
+
+```c++
+template<typename... Args>
+ostream& operator << (ostream& os, const tuple<Args...> &t) {
+    os << "[";
+    PRINT_TUPLE<0, sizeof...(Args), Args..>::print(os, t);
+    os << "]";
+}
+```
+
+递归主体:
+
+```c++
+略
+```
+
+
+
+## `nullptr`, `auto`
+
+`nullptr`是一个**关键字**，它会**自动转换为对应的指针类型**。而`NULL`或`0`虽然能够代表空指针的含义，但实际上是整数类型。
+
+```c++
+void f(int);
+void f(void*);
+
+f(0);//调用f(int)
+f(NULL);//调用f(int) 
+f(nullptr); //调用f(void*)
+```
+
+函数`f(NULL)`表达的含义不清晰，`NULL`一般用作空指针。但其类型是整数类型0，因此编译器会将NULL当作整数类型。
+
+## 统一初始化
+
+直接在变量名后加大括号
+
+```c++
+int values[] {1, 2, 3, 4};
+vector<int> v{2, 3, 5, 5};
+vector<string> cities{"sdf", "af", "adsf"};
+```
+
+编译器看到`{t1, ...,tn}`内部做出一个`initializer_list<T>`。 构造函数有一个版本接受这种形式。
+**如果构造函数中不接受这种形式，编译器会将`initializer_list<T>`拆解**，一个个丢进构造函数
+
+### Initializer List
+
+```c++
+int i; // 未定义
+int j{}; // 初始化未为0
+int *p; // 未定义
+int *p{}; // 初始化未nullptr
+```
+
+C++11提供了类模板`std::initializer_List<>`，可以被用来支持初始化，或者任何你想用的地方
+
+```c++
+void print(std::initializer_List<int> vals) {
+    for (auto p = vals.begin(); p != vals.end(); p ++) {
+        std::cout << *p << "\n";
+    }
+}
+
+print({1, 2, 3, 4, 5, 6}) // 传递一个处置里处理
+```
+
+> 注意：`initializer_List<>`与`variadic templates`有很大不同的，
+>
+> - 都支持任意数量参数。
+>
+> - `variadic templatees`还支持**任意的类型**，而`initializer_List<>`只支持一种类型
+
+`initializer_List<T>`实际上就是一个`array`
+
+> **拷贝动作是浅拷贝**
+
+```c++
+template<class _E>
+class initializer_list{
+public:
+    typedef _E* iterator;
+private:
+    iterator _M_array;
+    size_type _M_len;
+    //私有的构造函数由编译器调用
+    ctor()
+    ....
+
+};
+```
+
+## Range-based for statement
+
+## `=default, =delete`
+
+强制加上`=default`, 重新获得并使用**默认函数**
+
+```c++
+class Zoo
+{
+public:
+    Zoo(int i): _i(i){}
+    Zoo(Zoo&)=default;
+    Zoo(Zoo&&)=default;//move ctor
+    Zoo& operator=(const Zoo&)=default;
+}
+
+```
+
+### Big Three
+
+编译器为 **构造函数**、**赋值函数**、**析构函数**设置默认的函数
+
+### No Copy, NoDtor
+
+```c++
+struct NoCopy{
+    NoCopy(const NoCopy&)=delete;
+    NoCopy& operator()=(const NoCopy&)=delete;
+};
+```
+
+```c++
+struct PrivateCopy{
+private:
+    PrivateCopy(const PrivateCopy&);
+    PrivateCopy& operator()=(PrivateCopy NoCopy&);
+public:
+    ...
+}
+
+```
+
+## Alias
+
+### Alias Template
+
+`typedef`不接受参数
+
+```c++
+template<T>
+using vec=vector<T, myAlloc<T>>;
+```
+
+### Type Alias
+
+类似与typedef
+
+## noexpect
+
+函数后`noexpect`表示该函数不会发出异常
+
+```c++
+void foo() noexpect;等价于 void foo() noexpect(true)
+```
+
+## override
+
+让编辑器检查父类函数重写是否出错
+
+```c++
+class test{
+
+    virtual void funtion(int) override{};
+};
+```
+
+## final
+
+- 不允许父类被重写
+
+  ```c++
+    struct base final{};
+  ```
+
+- 不允许函数被重写
+
+  ```c++
+  struct test{
+      virtual void function() final;
+  };
+  ```
+
+## decltype
+
+得到一个表达式(可以是对象)的类型
+
+**auto + decltype**
+
+```c++
+map<string, float> mp;
+decltype<mp>::value_type elem;
+```
+
+- 声明返回类型
+
+  ```c++
+    template<typename T1, typename T2>
+    auto add(T1 x, T2, y)->decltype(x + y);
+  ```
+
+- 元编程中使用
+
+- 传递lambda的类型
+
+  ```c++
+    auto cmp=[](const Person &p1, const Person &p2)
+    {
+        return p1.name < p2;
+    };
+    ....
+    std::set<Person, decltype(cmp)> coll(cmp);
+  ```
+
+
+## Lambdas
+
+Lambdas相当于一个匿名的**仿函数**，其返回值是一个对象
+
+**语法**：[...](...) mutable throwSpec ->retType {...}
+
+![](D:/mygit/notes/images/20220216094150.png)
+
+## Rvalue references.右值引用
+
+> 解决不必要的拷贝，但是它实际还是一个引用
+>
+> **用于含有指针的面向对象设计，避免重复copy指针内容**
+
+比如stl vector
+
+```c++
+vector<A> res;
+// 1.调用一次默认构造函数；2.调用一次移动构造函数
+res.push_back(A());
+
+// 1.调用一次默认构造函数
+A a;
+// 2.调用一次copy构造函数
+res.push_back(a);
+```
+
+### 拷贝构造与移动构造
+
+<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220626211510971.png" alt="image-20220626211510971" style="zoom:50%;" />
+
+<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220626211553608.png" alt="image-20220626211553608" style="zoom:50%;" />
+
+### 拷贝赋值与移动赋值
+
+### move aware class
+
+```c++
+class String{
+private:
+    char* _data;
+    size_t _len;
+    void _init(char* s, size_t len){
+        _data = new char*(len + 1);
+        memcpy(s, s + len, _data);
+        _data[len] = '\0';
+        _len = len;
+    }
+public:
+    String(const String& rhs){ // 拷贝构造函数
+        _init(rhs._data, rhs._len);
+    }
+    String(String&& rhs) noexcept
+    	: _data(rhs._data), _len(rhs._len){ // 移动构造
+        rhs._data = nullptr;
+        rhs._len = 0;
+    }
+    
+    ~String() {  // 析构函数
+        if (_data) {
+            delete _data;
+        }
+    }
+    
+    String& operator = (const String& rhs) { // 拷贝赋值
+        if (this == &rhs) return *this;
+        if (_data) delete _data;
+        _init(rhs._data, rhs._len);
+        return *this;
+    }
+    String& operator = (String &&rhs) { // 移动赋值
+        if (this == &rhs) return *this;
+        if (_data) = delete _data;
+        _init(rhs._data, rhs._len);
+        rhs._data = nullptr;
+        rhs._len = 0;
+        return *this;
+    }
+};
+```
+
+
+
+# 8. 设计模式
+
+**总原则**：开闭原则
+
+开闭原则即**对扩展开放**，**对修改关闭**。在程序需要进行拓展的时候，不能去修改原有的代码，而是要扩展原有代码，实现一个热插拔的效果。所以一句话概括就是：为了使程序的扩展性好，易于维护和升级。想要达到这样的效果，我们需要使用接口和抽象类等，后面的具体设计中我们会提到这点。
+
+**1、单一职责原则**
+
+不要存在多于一个导致类变更的原因，也就是说**每个类应该实现单一的职责**，如若不然，就应该把类拆分。
+
+**2、里氏替换原则**
+
+里氏代换原则（LSP）是面向对象设计的基本原则之一。 里氏替换原则通俗来讲就是：`子类可以扩展父类的功能，但不能改变父类原有的功能`
+
+**3、依赖反转原则**
+
+这个是开闭原则的基础，具体内容：**面向接口编程，依赖于抽象而不依赖于具体**。写代码时用到具体类时，不与具体类交互，而与具体类的上层接口交互。
+
+**4、接口隔离原则**
+
+这个原则的意思是：**要为各个类建立它们需要的专用接口，而不要试图去建立一个很庞大的接口供所有依赖它的类去调用**。使用多个隔离的接口，比使用单个接口（多个接口方法集合到一个的接口）要好。
+
+**5、迪米特法则**（最少知道原则）
+
+就是说：一个类对自己依赖的类知道的越少越好。也就是说无论被依赖的类多么复杂，都应该将逻辑封装在方法的内部，通过public方法提供给外部。这样当被依赖的类变化时，才能最小的影响该类。
+
+最少知道原则的另一个表达方式是：只与直接的朋友通信。类之间只要有耦合关系，就叫朋友关系。耦合分为依赖、关联、聚合、组合等。我们称出现为成员变量、方法参数、方法返回值中的类为直接朋友。局部变量、临时变量则不是直接的朋友。我们要求陌生的类不要作为局部变量出现在类中。
+
+**6、合成复用原则**
+
+原则是尽量首先使用合成/聚合的方式，而不是使用继承。
+
+## 8.1. 创造型
+
+创建型模式的主要关注点是“**怎样创建对象？**”，它的主要特点是“**将对象的创建与使用分离**”。这样可以降低系统的耦合度，使用者不需要关注对象的创建细节，对象的创建由相关的工厂来完成。
+
+### 1. 单例模式
+
+> 不可以使用double check的单例模式，因为内存的重排序导致有线程安全问题
+
+C++11版本以前，线程安全的单例模式
+
+```c++
+class Singleton{
+private:
+    Singleton();
+    Singleton(const Singleton&);
+    Singleton operator(const Singleton&);
+    static Singleton* instance;
+    mutex mutex_;
+    
+public:
+    Singleton* getInstance() {
+        mutex_.lock();
+        if (instance == nullptr) {
+            instance = new Singleton();
+        }
+        mutex_.unlock();
+        return instance;
+    }
+};
+```
+
+C++11规定了local static在多线程条件下的初始化行为，要求编译器保证了内部静态变量的线程安全性。在C++11标准下，《Effective C++提出了一种更优雅的单例模式实现，使用函数内的 local static 对象。
+
+```c++
+class A{
+public :
+    static A& getInstance();
+private:
+    A();
+    A(const A&ths);
+};
+inline A::getInstance(){
+    static A a;//只要有人调用a就会一直存在
+
+    return a;
+}
+```
+
+### 2. 简单工厂模式
+
+#### 模型结构
+
+- Factory：工厂角色
+
+  工厂角色负责实现创建所有实例的内部逻辑
+
+- Product：抽象产品角色
+
+  抽象产品角色是所创建的所有对象的父类，负责描述所有实例所共有的公共接口
+
+- ConcreteProduct：具体产品角色
+
+  具体产品角色是创建目标，所有创建的对象都充当这个角色的某个具体类的实例。
+
+<img src="https://design-patterns.readthedocs.io/zh_CN/latest/_images/SimpleFactory.jpg" alt="../_images/SimpleFactory.jpg" style="zoom: 80%;" />
+
+```c++
+// 抽象product
+class Fruit{
+public:
+    virtual void use() = 0;
+};
+```
+
+```c++
+// 具体product
+class Apple： public Fruit{
+public:
+    void use() override {
+        printf("apple\n");
+    }
+};
+```
+
+```c++
+// 简单工厂
+class Factory{
+public:
+    Fruit createFruit(string s) {
+        if (s == "apple"){
+			return new Apple();
+        }
+    }
+};
+```
+
+#### 模型应用
+
+1. JDK类库中广泛使用了简单工厂模式，如工具类java.text.DateFormat，它用于格式化一个本地日期或者时间。
+
+   ```java
+   public final static DateFormat getDateInstance();
+   public final static DateFormat getDateInstance(int style);
+   public final static DateFormat getDateInstance(int style,Locale locale);
+   ```
+
+2. Java加密技术
+
+   ```java
+   // 获取不同加密算法的密钥生成器:
+   KeyGenerator keyGen=KeyGenerator.getInstance("DESede");
+   // 创建密码器:
+   Cipher cp=Cipher.getInstance("DESede");
+   ```
+
+### 3. 工厂方法模式
+
+> 工厂模式可以在不修改具体工厂类的情况下引进新的产品，只需要为这种新类型创建一个具体的工厂类就可以获得新实例，这一特点无疑使得工厂方法模式具有超越简单工厂模式的优越性，**更加符合“开闭原则”**。
+
+#### 模型结构
+
+工厂方法模式包含如下角色：
+
+- Product：抽象产品
+- ConcreteProduct：具体产品
+- Factory：抽象工厂
+- ConcreteFactory：具体工厂
+
+<img src="https://design-patterns.readthedocs.io/zh_CN/latest/_images/FactoryMethod.jpg" alt="../_images/FactoryMethod.jpg" style="zoom:80%;" />
+
+```c++
+// 抽象product
+class Fruit{
+public:
+    virtual void use() = 0;
+};
+// 具体product
+class Apple： public Fruit{
+public:
+    void use() override {
+        printf("apple\n");
+    }
+};
+// 具体product
+class Banana: public Fruit {
+public:
+    void use() override {
+        printf("banana\n");
+    }	
+};
+```
+
+```c++
+// 抽象工厂
+class Factory{
+public:
+    virtual Fruit factoryMethod() = 0;
+};
+
+// 苹果工厂
+class AppaleFactory{
+public:
+    Fruit factoryMethod() {
+        return Appale();
+    }
+};
+// 香蕉工厂
+class AppaleFactory{
+public:
+    Fruit factoryMethod() {
+        return Banana();
+    }
+};
+```
+
+#### 模型应用
+
+**日志记录器：**某系统日志记录器要求支持多种日志记录方式，如文件记录、数据库记录等，且用户可以根据要求动态选择日志记录方式， 现使用工厂方法模式设计该系统。
+
+<img src="https://design-patterns.readthedocs.io/zh_CN/latest/_images/loger.jpg" alt="../_images/loger.jpg" style="zoom:80%;" />
+
+
+
+### 4.抽象工厂模式
+
+<img src="https://design-patterns.readthedocs.io/zh_CN/latest/_images/AbatractFactory.jpg" alt="../_images/AbatractFactory.jpg" style="zoom:80%;" />
+
+#### 模型应用
+
+在很多软件系统中需要更换界面主题，要求界面中的按钮、文本框、背景色等一起发生改变时，可以使用抽象工厂模式进行设计。
+
+### 5. 建造者模式
+
+#### 模型结构
+
+建造者模式包含如下角色：
+
+- Builder：抽象建造者
+
+- ConcreteBuilder：具体建造者
+
+- Director：指挥者
+
+- Product：产品角色
+
+  <img src="D:\mygit\notes\images\Builder.jpg" alt="../_images/Builder.jpg" style="zoom:80%;" />
+
+#### 模型应用
+
+在很多游戏软件中，地图包括天空、地面、背景等组成部分，人物角色包括人体、服装、装备等组成部分，可以使用建造者模式对其进行设计，通过不同的具体建造者创建不同类型的地图或人物。
+
+## 8.2. 结构型
+
+### 1. 外观模式
+
+Facade模式可以为互相关联在一起的错综复杂的类整理出高层API，让系统对外只有一个简单的接口。
+
+**简单来说，是对复杂关系的接口做一个总结。**
+
+### 2. 代理模式
+
+> 只在必要时生成对象实例
+
+#### 模型结构
+
+参与角色:
+
+- 主体(Subject)：定义了Proxy角色和RealSubject角色之间的接口。由于Subject角色的存在，客户不需要在于调用的是Proxy还是RealSubject
+- 代理人(Proxy): 只有自己处理不了时，才会将工作交给RealSubject
+- 实体主体(RealSubject)
+
+<img src="https://design-patterns.readthedocs.io/zh_CN/latest/_images/Proxy.jpg" alt="../_images/Proxy.jpg" style="zoom:80%;" />
+
+
+
+## 8.3. 行为型
+
+### 1. 策略模式
+
+## 8.4. 其他
+
+# 其他
 
 ## C/C++程序编译过程
 
@@ -2305,13 +3535,20 @@ struct remove_cv{
 
 合并目标代码生成一个可执行目标文件
 
-## 函数调用深入分析
+## 函数调用分析
 
 ### 函数调用
 
 **栈帧**：用来记录函数的一次过程信息，被*esp*和*ebp*包裹
 
-`call 0xxxxx` 跳转到子函数
+```c++
+void test1(const String &s);
+void test2(int a, double b);
+```
+
+> 传递的参数会被拷贝一份压入栈帧中。
+>
+> 基本数据类型（包括引用，指针等）直接copy，而自定义类型编译器调用其**拷贝构造**函数
 
 ### 保存现场
 

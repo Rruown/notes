@@ -107,26 +107,34 @@ ssh-keygen -t ras//.ssh目录下生成公钥和私钥
   - `$(wildcard PATTERN...)` 获取指定目录下指定类型的文件列表
   - `$(patsubst <pattern>, <replacement>, <text>)` 查找`<text>`中的单词是否匹配`<pattern>`如果匹配则替换成`<replacement>`
 
-### CMakeLists
+### cmake
 
 #### 基础配置
 
 ##### 1. 项目名称及版本(必选)
 
-```bash
+```cmake
 project(项目名 version 版本号 language c cxx)
 ```
 
 ##### **2 指定编程语言版本**（可选）
 
-```bash
+`set`为变量和环境变量设置值，语法如下：
+
+```cmake
+set(<varible>/ENV{<varible>} <value> <value> ...)
+```
+
+指定编程语言版本：
+
+```cmake
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 11)
 ```
 
 ##### **3 配置编译选项**（可选）
 
-```text
+```cmake
 add_compile_options(-Wall -Wextra -pedantic -Werror) // 为所有编译器配置选项
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pipe -std=c99") // 针对C编译器配置
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe -std=c++11") // 针对C++编译器配置
@@ -134,13 +142,13 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe -std=c++11") // 针对C++编译器
 
 ##### **4 配置编译类型**（可选）
 
-```text
+```cmake
 set(CMAKE_BUILD_TYPE Debug) // 可设置为：Debug、Release、RelWithDebInfo、MinSizeRel等
 ```
 
 ##### **6 添加include目录**（必选）
 
-```text
+```cmake
 include_directories(src/c)
 ```
 
@@ -167,10 +175,67 @@ add_executable(可执行文件名 main.cxx)
 target_link_libraries(可执行文件名 链接库)
 ```
 
-## 标准C库IO函数和Linux系统IO函数对比
+## GoogleTest
 
-- C库IO函数是跨平台的， 比如`fopen`函数底层调用了不同操作的`open`函数。所以Linux系统IO函数更底层
-- C库IO函数实现了缓存区，减少了读取磁盘的次数
+gtest的好处:
+
+- 当测试失败时，gtest允许隔离运行它以进行快速调试。
+- gtest井井有条，并反映已测试代码的结构。
+- gtest可移植
+- gtest在第一次测试失败时不会停止。相反，它只能停止当前测试，并继续下一个测试。您还可以设置报告非致命故障的测试，然后进行当前测试。因此，您可以在单个编辑过程中检测和修复多个错误。
+- gtest会**自动跟踪所有定义的测试**，并且不需要用户枚举它们以运行它们。
+- 使用gtest，可以在测试中重复使用共享资源，而不是让测试相互依赖。
+
+test suite包含一个或多个test。您应该将test放入test suite分组以反映测试代码结构的测试套件中。
+
+一个测试程序包含多个test suite
+
+### Assertion基础
+
+`ASSERT_*`断言失败时将立刻从当前结束，可能会跳过清理代码从而造成内存泄漏
+
+`EXPECT_*`断言允许多个错误
+
+
+
+使用`<<`符号以自定义错误报告
+
+
+
+### Test Fixtures
+
+如果编写了两个或多个在类似数据上运行的测试，则可以使用test fixture。可以重用对象的相同配置进行多个不同的测试。
+
+**创建一个fixture：**
+
+- 创建一个类继承自`::testing::Test`，body部分使用`protected`，gtest将从子类访问成员
+- 定义默认构造函数或`SetUp()`函数
+- 定义析构函数或`TearDown()`函数
+
+**使用fixture**
+
+```c++
+TEST_F(TestFixtureName, TestName) {
+  ... test body ...
+}
+```
+
+当测试运行时，gtest将创建一个TestFixtureName对象t1，用SetUp函数初始化t1，测试，用TearDown函数并销毁t1
+
+**main()函数**
+
+大多数情况下不需要自己写`main`函数，它们会链接到`gtest_main`。如果要写自己的main函数必须要返回`RUN_ALL_TESTS()`的值
+
+```c++
+int main(int argc, char **argv) {
+  // The ::testing::InitGoogleTest() function parses the command line for googletest flags, 
+  // and removes all recognized flags.
+  ::testing::InitGoogleTest(&argc, argv); 
+  return RUN_ALL_TESTS();
+}
+```
+
+
 
 ## 文件描述符
 
@@ -208,7 +273,7 @@ int open(const char *pathname, int flags, mode_t mode);
 ### 文件信息
 
 ```c
- #include <sys/types.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -466,6 +531,16 @@ pid_t waitpid(pid_t pid, int *wstatus, int options);
 
 ### 匿名管道
 
+UNIX 系统 IPC （进程间通信）的最古老形式
+
+#### 管道的特点
+
+1.**半双工**：在管道中的数据的传递方向是单向的，一端用于写入，一端用于读取
+
+2.匿名管道**只能在具有公共祖先的进程**（父进程与子进程，或者两个兄弟进程，具有亲缘关系）之间使用。
+
+> fork函数创建一个子进程，父进程与子进程**共享用户地址空间**。所以父进程中创建一个管道，拿到管道**读端和写端**，同样子进程也会拥有管道读端和写端。
+
 ```c
 #include <unistd.h>
 int pipe(int pipefd[2]);
@@ -482,20 +557,14 @@ int pipe(int pipefd[2]);
 
 ### 有名管道
 
-**注意点**：一个为只读打开管道的进程会被阻塞，直到另一个进程为只写打开管道；一个为只写打开管道的进程会被阻塞，直到另一个进程为只读打开管道；
+>  **注意**：一个为只读打开管道的进程会被阻塞，直到另一个进程为只写打开管道；一个为只写打开管道的进程会被阻塞，直到另一个进程为只读打开管道；
 
 
 有名管道是一个特殊的文件（伪文件-不占用硬盘的空间，只是在内存中作用。通过内核去管理调用）。
-- 读管道:
-  - 读到数据时：返回实际读到的大小
-  - 读不到数据时: 
-    - 如果写端全部关闭，返回0
-    - 如果没有全部关闭，读端阻塞
-- 写管道：
-  - 如果读端全部关闭， 进程异常终止
-  - 读端没有全部关闭
-    - 管道满，写端阻塞
-    - 管道没满，返回实际写入的大小
+
+#### 有名管道的特点
+
+1. 不存在亲缘关系的进程，可以通过 FIFO 相互通信（相当于读写文件一样）
 
 ### 内存映射
 
@@ -530,6 +599,95 @@ int munmap(void *addr, size_t length);
 */
 ```
 
+### 信号
+
+信号是事件发生时对进程的通知机制，有时也称之为**软件中断**，它是在软件层次上对中断机制的一种模拟，是一种**异步通信**的方式。
+
+**使用信号的两个主要目的**是：
+
+- 让进程知道已经发生了一个特定的事情。
+- 强迫进程执行它自己代码中的**信号处理程序**。
+
+#### 信号函数
+
+**`signal`函数**——为一个**信号设置处理函数**
+
+```c
+#include＜signal.h＞
+_sighandler_t signal(int　sig,_sighandler_t _handler)
+
+参数：
+    sig：指出捕获的信号
+    _handler: 一个函数指针。用于指定信号sig的处理函数
+返回值:
+	成功: 前一次调用signal函数时传入的函数指针或默认处理函数指针SIG_DEF
+    失败: 返回SIG_ERR
+```
+
+**`sigaction`函数——更健壮的设置处理函数**
+
+```c
+#include＜signal.h＞
+int sigaction(int sig,const struct sigaction*act,struct sigaction*oact);
+
+struct sigaction
+{ 
+    #ifdef__USE_POSIX199309
+        union
+        { 
+            _sighandler_t
+            sa_handler;
+            void(*sa_sigaction)(int,siginfo_t*,void*);
+        } 
+        _sigaction_handler;
+    #define sa_handler __sigaction_handler.sa_handler
+    #define sa_sigaction__sigaction_handler.sa_sigaction
+    #else
+    	_sighandler_t sa_handler;
+    #endif
+        _sigset_t sa_mask;
+        int sa_flags;
+        void(*sa_restorer)(void);
+};
+```
+
+`sigaction`的**`sa_hander`**成员指定**信号处理函数**。**`sa_mask`**成员**设置进程的信号掩码**（确切地说是在进程原有信号掩码的基础上增加信号掩码），以指定哪些信号不能发送给本进程
+
+#### 挂起信号
+
+设置进程信号掩码后，被屏蔽的信号将不能被进程接收。如果给进程发送一个被屏蔽的信号，则操作系统将该信号设置为进程的一个被挂
+起的信号。如果我们取消对被挂起信号的屏蔽，则它能立即被进程接收到。
+
+#### 信号集
+
+在 **PCB** 中有两个非常重要的信号集。一个称之为 “**阻塞信号集** ”，另一个称之为“**未决信号集**“ 。这两个信号集都是内核使用位图机制来实现的。
+
+信号的 “未决 是一种状态，指的是从信号的产生到信号被处理前的这一段时间。
+
+信号的 “阻塞 是一个开关动作，指的是阻止信号被处理。
+
+```c
+// 信号集相关的处理函数
+
+// 清空信号集
+int sigemptyset(sigset_t *set);
+// 所有信号标志位设为1
+int sigfillset(sigset_t *set);
+// 添加signum信号
+int sigaddset(sigset_t *set, int signum);
+// 删除signum信号
+int sigdelset(sigset_t *set, int signum);
+// 判断signum是否是阻塞信号
+int sigismember(const sigset_t *set, int signum);
+// 将用户区的信号集set设置到内核中的阻塞信号集中
+int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
+
+int sigpending(sigset_t *set);
+```
+
+#### 信号捕捉过程
+
+<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220630195123139.png" alt="image-20220630195123139" style="zoom: 50%;" />
 
 # 线程
 
@@ -1105,13 +1263,32 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 
 当`epoll_wait`通知的后，应用程序必须要处理，因为后续调用`epoll_wait`将不再通知该事件
 
+> 每个使用ET模式的文件描述符都应该是**非阻塞的**。如果文件描述符是阻塞的，那么读或写操作将会因为没有后续的事件而一直处
+> 于阻塞状态（饥渴状态）。
+
+ET模式要求应用程序一次性读取所有数据，或者一次性写完所有数据。经典`EPOLLIN`的如下:
+
+```c++
+while (true) {
+    int len = recv(...);
+    if (len < 0) {
+        if (errno == EAGAIN || errnor = EWOULDBLOCK){
+            break;
+        }
+        close(fd);
+    }
+}
+```
+
+如果文件文件描述符是**阻塞**的，读/写进程在读/写完后将一直阻塞于`recv`/`send`函数。
+
 #### EPOLLONESHOT事件
 
 > 即使使用ET模式，一个socket上的某个事件还是可能被触发多次。这在并发程序中就会引起一个问题。比如一个线程在读取完某个socket上的数据后开始处理这些数据，而在数据的处理过程中该socket上又有新数据可读（EPOLLIN再次被触发），此时另外一个线程被唤醒来读取这些新的数据。于是就出现了两个线程同时操作一个socket的局面
 
 对于注册了EPOLLONESHOT事件的文件描述符，操作系统最多触发其上注册的一个可读、可写或者异常事件，且只触发一次，除非**使用`epoll_ctl`函数重置该文件描述符上注册的EPOLLONESHOT事件**。
 
-# 项目实战
+# 高性能服务器
 
 ## 阻塞和非阻塞、同步与异步
 
@@ -1139,7 +1316,7 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 
 **请求队列:** 单元间的通信方式
 
-I/O处理单元主要负责接收新的客户端连接，接收客户端数据，将服务端的处理结果返回给客户端。但是数据的收发也可能在逻辑单元进行，具体看哪种事件处理模式。
+I/O处理单元是服务器管理客户端连接的模块，主要负责等待和接收新的客户端连接，接收客户端数据，将服务端的处理结果返回给客户端。但是数据的收发也可能在逻辑单元进行，具体看哪种事件处理模式。
 
 一个逻辑单元通常是一个线程。它负责处理客户端请求数据，并将结果交给I/O处理单元。也可以直接交付给客户端，具体看哪种事件处理模式。
 
@@ -1149,13 +1326,13 @@ I/O处理单元主要负责接收新的客户端连接，接收客户端数据�
 
 服务器通常需要处理三个事件:I/O事件、信号及定时事件
 
-#### Reactor模式
+#### Reactor模式（重点）
 
 主线程（I/O处理单元）只负责监听文件描述符上是否有事件发生，将事件添加到请求队列并通知子线程处理事件。数据的读写，接收新的连接以及处理请求均由工作线程独立完成。
 
 <img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220615202556392.png" alt="image-20220615202556392" style="zoom:50%;" />
 
-使用同步I/O模型实现Reactor模式的工作流程：
+**使用同步I/O模型实现Reactor模式的工作流程：**
 
 1. 主线程往epoll内核注册socket上的读就绪事件
 2. 主线程调用epoll_wait等待事件发生
@@ -1167,26 +1344,95 @@ I/O处理单元主要负责接收新的客户端连接，接收客户端数据�
 
 #### proactor模式
 
-### 线程同步机制类封装及线程池实现
+与Reactor模式不同，Proactor模式将所有I/O操作都交给**主线程**和**内核**来处理，工作线程仅仅负责业务逻辑
 
-#### 线程池
+![image-20220708133352230](D:\mygit\notes\images\image-20220708133352230.png)
 
-> 改进点:类似于java的ExecutorPool——当任务空闲时，释放一些线程资源；当任务繁忙时，新创建一些工作线程
+**使用异步I/O模型（以aio_read和aio_write为例）实现的Proactor模式的工作流程是：**
 
-## 线程池
+1. 主线程调用aio_read函数向内核注册socket上的读完成事件，并告诉内核用户读缓冲区的位置，以及读操作完成时如何通知应用程序
+2. 主线程继续处理其他逻辑。
+3. 当socket上的数据被读入用户缓冲区后，内核将向应用程序发送一个信号，以通知应用程序数据已经可用。
+4. 应用程序预先定义好的信号处理函数选择一个工作线程来处理客户请求。工作线程处理完客户请求之后，调用aio_write函数向内核注册socket上的写完成事件，并告诉内核用户写缓冲区的位置，以及写操作完成时如何通知应用程序。
+5. 主线程继续处理其他逻辑。
+6. 当用户缓冲区的数据被写入socket之后，内核将向应用程序发送一个信号，以通知应用程序数据已经发送完毕
+7. 应用程序预先定义好的信号处理函数选择一个工作线程来做善
+   后处理，比如决定是否关闭socket。
 
-### 线程安全的队列
+#### 模拟proactor模式（了解）
 
-数组or链表
-
-循环队列
-
-hh = 0, tt = 0
+其原理是：主线程执行数据读写操作，读写完成之后，主线程向工作线程通知这一“完成事件”。那么从工作线程的角度来看，它们就直接获得了数据读写的结果，接下来要做的只是对读写的结果进行逻辑处理。
 
 
 
-hh = 0, tt = - 1;
+## 定时器
 
-空：tt < hh
+定时事件，比如定期检测一个客户连接的活动状态。
 
-满： （tt + 1）== hh
+将每个定时事件分别封装成定时器，并使用某种容器类数据结构，比如链表、排序链表和时间轮，将所有定时器串联起来，以实现对定时事件的统一
+管理。
+
+### 定时方法
+
+**1.socket选项`SO_RCVTIMEO`和`SO_SNDTIMEO`**
+
+分别用来设置socket**接收数据超时时间**和**发送数据超时时间**。因此，这两个选项仅对与数据接收和发送相关的socket专用系统调用
+有效，这些系统调用包括send、sendmsg、recv、recvmsg、accept和connect。
+
+```c
+int ret = setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, ＆timeout, len); // 设置sockfd的发送数据超时时间
+```
+
+**2.SIGALRM信号**
+
+由`alarm`和`setitimer`函数设置的实时闹钟一旦超时，将触发SIGALRM信号。利用该信号的信号处理函数来处理定时任务。
+
+alarm函数设置一个alarm时钟发送信号，一次alarm调用触发一次SIGALRM信号
+
+```c
+#include <unistd.h>
+unsigned int alarm(unsigned int seconds);
+
+/*
+参数：
+	seconds： 参数是0就取消alarm
+*/
+```
+
+**3.I/O复用系统调用的超时参数**
+
+Linux下的3组I/O复用系统调用都带有超时参数，因此它们不仅能统一处理信号和I/O事件，也能统一处理定时事件。
+
+## 服务压力测试
+
+Webbench 是 Linux 上一款知名的、优秀的 web 性能压力测试工具。它是由Lionbridge公司开发。
+
+> 测试处在相同硬件上，不同服务的性能以及不同硬件上同一个服务的运行状况。
+> 展示服务器的两项内容：每秒钟响应请求数和每秒钟传输数据量。
+
+基本原理：Webbench 首先 fork 出多个子进程，每个子进程都循环做 web 访问测试。子进程把访问 的
+结果通过pipe 告诉父进程，父进程做最终的统计结果。
+
+**测试示例**
+
+```c++
+webbench -c 1000 -t 30 http://192.168.110.129:10000/index.html
+参数：
+-c 表示客户端数
+-t 表示时间
+```
+
+### 压力测试结果
+
+8CPU
+
+|          | 10   | 1000  | 1e4    | 1e5           |
+| :------- | ---- | ----- | ------ | ------------- |
+| 阻塞队列 | 9513 | 9630  | 11.8   | 16.3 (超负荷) |
+| 无锁队列 | 6861 | 11000 | 50.6   | 70.6 (超负荷) |
+|          | -28% | 14.2% | 328.8% | 333.1%        |
+
+
+
+
+

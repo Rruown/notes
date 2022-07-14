@@ -1,5 +1,51 @@
 # 基础命令
 
+## 系统管理
+
+> 如何（自动）启动/关闭服务
+
+计算机中，一个正在执行的程序或命令，被叫做“进程”（process）。
+启动之后一只存在、常驻内存的进程，一般被称作“服务”（service）。
+
+### service服务管理
+
+**基本语法**
+
+```bash
+service 服务名 start|stop|restart|status
+```
+
+**常用案例**
+
+```bash
+/etc/init.d/ # 查看服务
+
+service ssh start # 启动ssh服务
+```
+
+### systemctl
+
+> 更加强大的service
+
+**基本语法**
+
+```bash
+systemctl start | stop | restart | status 服务名 # 启动| 关闭 | 重启 | 查看 服务
+systemctl list-unit-files # 查看服务开机启动状态
+systemctl enable 服务名 # 开启指定服务的自动启动
+systemctl disable 服务名 # 关闭指定服务的自动启动
+```
+
+**常用案例**
+
+```bash
+/usr/lib/systemd/system # 查看服务
+systemctl enable ssh # 开启ssh服务的自动启动
+systemctl disable ssh # 关闭ssh服务的自动启动
+```
+
+
+
 ## 搜索查找
 
 ### find
@@ -33,6 +79,136 @@ find [搜索范围，默认当前目录][选项]
 ```bash
 locate 搜索文件
 ```
+
+
+
+## 进程管理
+
+### ps
+
+**选项说明：**
+
+- a: 列出带有终端的所有用户的进程
+- x: 列出当前用户的所有进程，包括没有终端的进程
+- u: 面向用户友好的显示风格
+- e: 列出所有进程
+- u: 列出某个用户关联的所有进程
+- f: 显示完整格式的进程列表
+
+常用命令：
+
+```bash
+ps aux # 查看系统所有进程
+ps -ef # 查看子父进程之间的关系
+```
+
+### kill
+
+常用命令
+
+```bash
+kill -9 PID # 向PID发送SIGINT信号，强制关闭进程
+killall 进程名 # 通过进程名杀死进程
+```
+
+### pstree 查看进程树
+
+**基本语法**
+
+```bash
+pstree [-p/-u]
+```
+
+**常用选项：**
+
+- p: 显示进程的PID
+- u: 显示进程的所属用户
+
+### top
+
+### netstat 
+
+**显示网络状态和端口占用信息**
+
+**基本语法**
+
+```bash
+netstat -anp | grep 进程号 # 查看进程网络信息
+netstat -nlp | grep 端口号 # 查看网络端口占用情况
+```
+
+**常用选项：**
+
+- a: 显示所有正在监听（listen）和未监听的套接字（socket）
+- n: 拒绝显示别名，能显示数字的全部转化成数字
+- l: 仅列出在监听的服务状态
+- p: 表示显示哪个进程在调用
+
+## 文件目录管理
+
+**常用命令**
+
+```bash
+pwd # 显示当前工作目录
+ls -al # 列出当前目录下的所有文件信息（包括隐藏文件）
+cd 
+mkdir
+rmdir	
+touch
+cp -r source target # -r表示递归复制文件目录下的所有文件
+rm -rf 文件名 # -f 强制执行
+mv 文件1 文件2 # 移动或重名文件(夹)
+cat，more,less, head, tail # 查看文件内容
+
+```
+
+### 输出重定向与追加
+
+**基本语法**
+
+```bash
+ls -l > 文件 # 将ls -l的内容写入文件中（覆盖写）
+ls -l >> 文件 # 追加写
+```
+
+### 软连接
+
+> ln 命令默认硬链接，-s表示软链接
+
+**基本语法**
+
+```bash
+ln -s 原文件（目录） 连接名
+```
+
+## 用户管理
+
+> /etc/passwd 
+
+**常用命令**
+
+```bash
+useradd 用户名 # 添加用户
+userdel 用户名 # 删除用户
+passwd 用户名 # 为用户设置密码
+id 用户名 # 判断用户名是否存在
+su 用户名 # 切换用户
+```
+
+
+
+## 用户组管理
+
+**常用命令**
+
+```bash
+groupadd 组名 # 新增组
+groupdel 组名 # 删除组
+groupmod -n 新名字 旧名字 # -n 指定工作组名字
+usermod -g 用户组 用户名 # 修改用户的所属组
+```
+
+
 
 # Shell编程
 
@@ -331,6 +507,85 @@ END：在读完数据后执行脚本命令
 
 `NR`: number of recent 已经读出的记录数，就是行号，从1开始
 
+#### Actions
+
+> 设计跟c语言类似
+
+##### 运算符
+
+> 以下没有的运算符，使用方式与c语言一样
+
+```bash
+空格 # 字符串连接
+| |& # 管道运算符，用在getline, print, printf函数
+in # 数组成员
+？： # 三元运算符
+~ !~ # 正则表达式匹配, 注意要用/regex/
+```
+
+##### 控制语句
+
+```bash
+if,while,do-while,for,for(a in b),break, continue 与c语言一致
+delete array[index]
+delete array
+exit [可选的表达式] {语句}
+switch (表达式) {
+	case 值或正则表达式: 
+		语句
+	...
+	default: 
+		语句
+}
+
+```
+
+##### 输入/输出语句
+
+```bash
+close(file) # 关闭文件或管道
+getline # 将下一行记录放入$0,并设置NF,NR, FNR, RT
+getline <file # 将文件中的下一行记录放入$0,并设置NF,RT
+getline var # 将下一行记录放入var,并设置NR, FNR, RT
+getline var <file # 将文件中的下一行记录放入var,并设置RT
+command | getline var # 运行command命令，管道输出到var或$0
+next # 跳到下一行记录
+nextfile # 跳到下一个文件进行处理
+
+
+print # 输出当前行记录
+print expr-list # 输出表达式列表，每个表达式由OFS分割，直到ORS结束(expr-list形如 a,"123",1)
+print expr-list >file # 输出到文件
+print fmt, expr-list # 格式化输出
+print fmt, expr-list >file # 格式化输出到文件
+
+sytem(cmd-line) # 执行一个命令返回运行结果
+fflush([file]) #
+
+print ... >> file # 追加写入文件
+print ... | command # 
+
+```
+
+##### 函数
+
+**数组函数**
+
+```bash
+cos,sin,int,log,rand,sqrt...
+```
+
+**字符串函数**
+
+```bash
+index(s,t) # 返回字符串t在s中的索引位置， 从1开始，0是错误
+length([s]) # 返回字符串s或$0的长度
+substr(s,i[,n]) # 截取s的子串，从i开始截取n个字符
+待定...
+```
+
+
+
 ### `wc`
 
 #### 基本语法
@@ -342,3 +597,37 @@ wc [-clw] [文件...]
 - `-c` --chars 只显示字节数
 - `-l` --lines 只显示行数 
 - `-w` --words 只显示单词数
+
+### `cat`
+
+### `uniq`
+
+忽略重复行
+
+#### **基本语法**
+
+```bash
+uniq [OPTION] [INPUT [OUTPUT]]
+```
+
+- c: 行数
+
+- d: 只打印重复行
+
+- u: 只打印唯一行
+
+- i: 忽略大小写
+
+  
+
+### `sort`
+
+按行排序文件数据	
+
+#### 基本语法
+
+```bash
+sort [OPTION] [FILE]
+```
+
+- r: 反转排序结果
