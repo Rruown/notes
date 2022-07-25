@@ -1,23 +1,43 @@
+
+
+
+
 # 1. 语言基础
 
 ## 1.1 关键字
 
-### const与volatile
+### `const`与`volatile`
 
 #### **类型限定符**
 
-> const 定义类型为常量
+> `const` 定义类型为常量
 > volatile 定义类型为易变
 
 **const对象**——对象不能被修改。直接尝试修改对象内容，编译器报错。
 
+> const只有用在成员函数时可以算作函数签名的一部分
+
 **volatile对象**——类型为 `volatile-`限定的对象，通过 `volatile`限定的类型的泛左值表达式的每次访问（读或写操作、成员函数调用等），都被当作对于优化而言是可见的副作用（即在单个执行线程内，volatile 访问不能被优化掉，或者与另一[按顺序早于](https://zh.cppreference.com/w/cpp/language/eval_order)或按顺序晚于该 volatile 访问的可见副作用进行重排序）
-
-
 
 #### **限定成员函数**
 
 在有 cv 限定符的函数体内，`*this` 有同样的 cv 限定
+
+#### `const T&`
+
+`const T&`的初始化可以是左值也可以是右值。
+
+```c++
+double &dr = 1; // 错误： 需要左值
+const double &cdr {1}; // 正确
+```
+
+`const T&`初始化的解释可能如下:
+
+```c++
+double tmp = double{1}; // 首先创建一个右值的临时变量
+const double &cdr{tmp}; // 然后用临时变量初始化cdr
+```
 
 ### extern
 
@@ -113,94 +133,19 @@ p->f(); // 隐式实例化 Z<char> 且 Z<char>::f() 在此出现。
 静态成员函数不关联到任何对象。调用时，它们没有 this 指针。
 静态成员函数的地址可以存储在常规的函数指针中，但不能存储在成员函数指针中。
 
-
-
-## 智能指针
-
-基于RAII原理实现：对象销毁时，自动调用析构函数
-
-### auto_ptr（舍弃）
-
-```c++
-template<T>
-class auto_ptr{
-    //数据
-private:
-    T* M_ptr;
-   
-public:
-    //构造函数
-    auto_ptr(T* __p = 0) : _M_ptr(__p) { }
-
-    //拷贝构造
-    auto_ptr(auto_ptr& __a): _M_ptr(__a.release()) { }
-
-    //什么都没做，只是将指针置空
-    T* release() 
-    {
-        T* __tmp = M_ptr;
-        M_ptr = 0;
-        return __tmp;
-    }
-    //释放内存
-    voi reset(T* __p = 0) 
-      {
-        if (__p != _M_ptr)
-        {
-            delete _M_ptr;
-            _M_ptr = __p;
-        }
-      }
-    //重点
-    auto_ptr& operator=(auto_ptr& __a)
-    {
-        reset(__a.release());
-        return *this;
-    }
-};
-
-```
-`auto_ptr`**指针的复制或分配会更改所有权**
-```c++
-auto_ptr<string> p1 = auto_ptr<string>(new string("123"));
-auto_ptr<string> p2;
-p2 = p1;
-
-```
-
-`p2`智能指针的拷贝复制会更改资源的所有权，导致原来的智能指针**悬空**
-
-### unique_ptr
-
-```c++
-template<T>
-class unique_ptr{
-    unique_ptr(const unique_ptr&) = delete;
-    unique_ptr& operator=(const unique_ptr&) = delete;
-
-};
-```
-
-`unique_ptr`采用了**严格所有权**，删除了拷贝构造和拷贝复制，支持**移动构造**和**移动复制**。
-
-### share_ptr
-
-shared_ptr实现**共享式**拥有概念。多个智能指针可以指向相同对象，该对象和其相关资源会在“最后一个引用被销毁”时候释放。
-
-**计数器**的可以通过一个指针实现，指针指向计数器管理类，`share_ptr`的拷贝构造和拷贝复制，同时复计数器管理类指针即可。
-
-```c++
-//weak_ptr函数结构
-
-int use_count();
-bool expired();//检查被引用的对象是否已经删除
-share_ptr<int> lock();//创建管理被引用对象的share_ptr
-
-```
-
 ## 静态多态与动态多态
 
 静态多态（函数重载和运算符重载 +类），是在编译的时候，就确定调用函数的类型；动态多态（虚函数实现），在运行的时候，才能确定调用的是哪个函数，动态绑定。运行基类指针指向派生类的对象，并调用派生类的函数。
+
+## 函数类型与函数声明
+
+```c++
+void say_hello(const char *str); // 函数
+void (*fptr)(const char *); // 函数类型
+
+```
+
+
 
 ## C语言
 
@@ -237,9 +182,38 @@ void* memcpy(void* dest, void* src, size_t len) {
 
 
 
-## 异常处理
+## 异常处理与异常安全
 
 > 用异常和断言是避免程序错误
+
+### 异常设计——契约
+
+> Eiffel观点: 契约破坏才会有Exception 
+
+<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220719211549822.png" alt="image-20220719211549822" style="zoom:50%;" />
+
+
+
+面向对象程序设计中经常讨论的一个设计方法是契约设计，它指出方法是**客户（方法的调用者）和声明方法的类之间的契约**。这个契约包括客户必须满足的前置条件（precondition）和方法本身必须满足的后置条件（postcondition）等，具体如上图所示。
+
+**比如String类的charAt(index)方法**
+
+**前置条件**: 客户传入的index参数的最小取值是0，最大取值是在该String对象上调用length()方法的结果减去1。如果客户违反契约，它将抛出异常`StringIndexOutOfBoundsException`
+
+**后置条件:** `String`类的`charAt(int index)`方法的后置条件要求返回值必须是该字符串对象在index位置上的字符数据
+
+### C++中的异常类
+
+<img src="http://c.biancheng.net/uploads/allimg/190218/114Q24150-0.jpg" alt="C++ exception类层次图" style="zoom:80%;" />
+
+### 异常安全
+
+以下是四个被广泛认可的异常保证等级:
+
+- 不抛出异常保证: 函数始终不会抛出异常
+- 强异常保证: 如果函数抛出异常，那么程序的状态会恰好被回滚到该函数调用前的状态
+- 基础异常保证
+- 无异常保证
 
 # 2. 内存管理
 
@@ -328,14 +302,14 @@ delete[] ptr; // 调用3次dtor
 
 <img src="D:\mygit\notes\images\20220629164152.png" style="zoom:33%;" />
 
-#### 内存溢出的情况
+#### 内存泄漏的情况
 
-对于含有指针的类, **一次delete能够回收3个内存，但只调用了一次dtor**，会导致内存溢出
+对于含有指针的类, **一次delete能够回收3个内存，但只调用了一次dtor**，会导致内存泄漏
 
 ```c++
 MyClass *ptr = new MyClass[3]; // 调用3次ctor
 ...
-delete ptr; // 调用1次dtor，内存溢出
+delete ptr; // 调用1次dtor，内存泄漏
 ```
 
 ### `placement new`
@@ -627,6 +601,8 @@ G2.9的allocator只是以`::operator new`和`::operator delete`完成`allocate()
 G4.9的allocator只是以`::operator new`和`::operator delete`完成`allocate()`和`deallocate()`，没有特殊设计
 
 ### G2.9 std_alloc运行模式
+
+> `alloc`负责管理8~128字节的小块区域，小块内存的带有cookie信息会导致空间利用率较低。而大于128字节的区域直接由malloc申请
 
 <img src="D:\mygit\notes\images\20220703165436.png" style="zoom: 67%;" />
 
@@ -1656,19 +1632,45 @@ sizeof (a) == sizeof (&alias_a)
 
 基类A有两个虚函数 ``vfunction1``、``vfuntion2``，派生类B重写了A的vfunction1继承了vfunciton2。
 
-vpt指向vtbl，vtbl存放虚函数的指针
+vptr指向vtbl，vtbl存放虚函数的指针
 
 ``new C()``得到p指针，``(*(p->vptr)[n])(p)``
 
+
+
 **重点的内容**：
 
-- 派生类集成了父类的函数调用权限
+- 派生类继承了父类的函数调用权限，同时也**继承了虚表**，因此派生类中的虚函数索引与基类中的虚函数索引一致。
 - 只要类中含有一个虚函数，内存中就有一个vptr
 - 静态绑定： 汇编 ``call.XXXXX(地址)``
 - 编译器看到符合3个条件就会动态绑定：根据p指针指向的对象不一样，调用的函数也不一样
-  - 通过指针调用
-  - 指针向上转型（将派生类基类的部分赋值给基类）
-  - 调用虚函数
+  - **通过指针调用**
+  - **指针向上转型（将派生类基类的部分赋值给基类）**
+  - **调用虚函数**
+
+基类不使用虚函数的情况如下，`基类指针只调用基类的析构函数`，从而可能造成内存泄漏
+
+```c++
+class A{
+public:
+    ~A(){
+        cout << "A dtor" << endl;
+    }
+};
+class B: public A{
+public:
+    ~B(){
+        cout << "B dtor" << endl;
+    }
+};
+int main(){
+    A *a = new B; // 输出 Adtor
+    delete a;
+    return 0;
+}
+```
+
+
 
 ### 对象模型：this.概念
 
@@ -1705,6 +1707,45 @@ int main(){
 ```
 
 **虚函数的实现与抽象函数实现基本类似，派生类调用非虚函数时实际上调用的是父类的非虚函数， 而派生类实现了父类的虚函数时，调用的则是自己的虚函数——动态绑定实现**
+
+## 4.7. 重载、重写与隐藏
+
+|              | 返回类型 | 参数                         | 说明                                         | 范围             |
+| ------------ | -------- | ---------------------------- | -------------------------------------------- | ---------------- |
+| 重载         | 无关     | （类型、个数、顺序）必须不同 | 是指同一可访问区内的同名函数                 | **同一类中**     |
+| 重写（覆盖） | 相同     | 相同                         | 是指派生类重新定义了基类中的同名函数         | 派生类与基类     |
+| 隐藏         | 无关     | 无关                         | 派生类屏蔽了基类的同名函数，只要同名就会隐藏 | **派生类与基类** |
+
+### 隐藏
+
+派生类的函数屏蔽了与其同名的基类函数，注意只要同名函数，不管参数列表是否相同，基类函数都会被隐藏。
+
+```c++
+class Base
+{
+public:
+    void fun(double ,int ){ cout << "Base::fun(double ,int )" << endl; }
+};
+
+class Derived : public Base
+{
+public:
+    void fun(int ){ cout << "Derived::fun(int )" << endl; }
+};
+
+int main()
+{
+    Derived pd;
+    pd.fun(1);//Derived::fun(int )
+    pb.fun(0.01, 1);//error C2660: “Derived::fun”: 函数不接受 2 个参数
+
+    return 0;
+}
+```
+
+
+
+
 
 # 5. Effective C++
 
@@ -2753,53 +2794,225 @@ struct remove_cv{
 
 # 7. 新特性
 
-## 四种类型转换
+## C++11
 
-### static_cast
+### 1. 智能指针
 
-```c++
-//基础数据类型之间的转换
-int a = 65;
-char ch = static_cast<char>(a);
-cout << ch;//A
+> 基于RAII原理实现：对象销毁时，自动调用析构函数
 
-class Base{
-    virutal test();
-};
-class Derived : Base{
-    virtual test();
-};
-Derived *d = new Drived();
-Base *b = static_cast<Base*>(d);
+#### auto_ptr（舍弃)
 
-//父类和子类之间的转换，子类转父类是安全的，父类转子类是不安全的
-```
-
-类似与C语言的强制类型转换，可以用在基础数据类型之间的转换和父类和子类之间的转换 父类指针和子类指针之间的转换最好使用dynamic_cast.
-
-### dynamic_cast
-
-用于含有虚函数的类之间向上、向下和侧向之间的转换
+> 独占所有权。 `auto_ptr`的**拷贝复制**的语义是移动复制的语义，容易造成对象所有权的转移而客户却不知道。
 
 ```c++
-Base* pb = new Sub();
-Sub* ps1 = static_cast<Sub*>(pb);  //子类->父类，静态类型转换，正确但不推荐
-Sub* ps2 = dynamic_cast<Sub*>(pb); //子类->父类，动态类型转换，正确
+template<T>
+class auto_ptr{
+    //数据
+private:
+    T* M_ptr;
+   
+public:
+    //构造函数
+    auto_ptr(T* __p = 0) : _M_ptr(__p) { }
 
-Base* pb2 = new Base();
-Sub* ps21 = static_cast<Sub*>(pb2); //父类->子类，静态类型转换，危险！访问子类_name成员越界
-Sub* ps22 = dynamic_cast<Sub*>(pb2);//父类->子类，动态类型转换，安全，但结果为NULL 
+    //拷贝构造
+    auto_ptr(auto_ptr& __a): _M_ptr(__a.release()) { }
+
+    //什么都没做，只是将指针置空
+    T* release() 
+    {
+        T* __tmp = M_ptr;
+        M_ptr = 0;
+        return __tmp;
+    }
+    //释放内存
+    voi reset(T* __p = 0) 
+      {
+        if (__p != _M_ptr)
+        {
+            delete _M_ptr;
+            _M_ptr = __p;
+        }
+      }
+    //重点
+    auto_ptr& operator=(auto_ptr& __a)
+    {
+        reset(__a.release());
+        return *this;
+    }
+};
+
 ```
 
-### const_cast
+`auto_ptr`**指针的复制或分配会更改所有权**
 
-const_cast的作用就是将**常量指针转换为普通的指针**
+```c++
+auto_ptr<string> p1 = auto_ptr<string>(new string("123"));
+auto_ptr<string> p2;
+p2 = p1;
+```
 
-### reinterpret_cast
+`p2`智能指针的拷贝复制会更改资源的所有权，导致原来的智能指针**悬空**
+
+#### unique_ptr
+
+> 独占所有权。对auto_ptr做了改进，删除了默认的拷贝复制函数和拷贝构造函数，新增了移动复制和移动构造函数
+
+```c++
+template<T>
+class unique_ptr{
+    unique_ptr(const unique_ptr&) = delete;
+    unique_ptr& operator=(const unique_ptr&) = delete;
+
+};
+```
+
+`unique_ptr`采用了**严格所有权**，删除了拷贝构造和拷贝复制，支持**移动构造**和**移动复制**。
+
+#### share_ptr
+
+shared_ptr实现**共享式**拥有概念。多个智能指针可以指向相同对象，该对象和其相关资源会在“最后一个引用被销毁”时候释放。
+
+**计数器**的可以通过一个指针实现，指针指向计数器管理类，`share_ptr`的拷贝构造和拷贝复制，同时复计数器管理类指针即可。
+
+> 只有通过拷贝构造和拷贝复制其值给另一个`shared_ptr`，才能将对象的所有权共享
+
+#### weak_ptr
+
+> 循环引用可能会导致`shared_ptr`无法正确的释放资源，而`weak_ptr`不影响计数器，只提供访问资源的方式。所以每次访问前，需要先判断资源是否被删除
+
+`shared_ptr`循环引用
+
+```c++
+
+class Son;
+class Father {
+public:
+    shared_ptr<Son> son_;
+    Father() {
+        cout << __FUNCTION__ << endl;
+    }
+    ~Father() {
+        cout << __FUNCTION__ << endl;
+    }
+};
+class Son {
+public:
+    shared_ptr<Father> father_;
+    Son() {
+        cout << __FUNCTION__ << endl;
+    }
+    ~Son() {
+        cout << __FUNCTION__ << endl;
+    }
+};
+int main()
+{
+    auto son = make_shared<Son>();
+    auto father = make_shared<Father>();
+    son->father_ = father;
+    father->son_ = son;
+    cout << "son: " << son.use_count() << endl; // son: 2
+    cout << "father: " << father.use_count() << endl; // father: 2
+    return 0;
+}
+
+```
+
+**weak_ptr主要使用的函数:**
+
+```c++
+
+int use_count();
+bool expired();//检查被引用的对象是否已经删除
+share_ptr<int> lock();//创建管理被引用对象的share_ptr
+```
+
+
+
+### 2. 四种类型转换
+
+#### static_cast
+
+> 用隐式和用户定义转换的组合在类型间转换。
+>
+> 注意: static_cast是静态转换，`dynamic_cast`是运行时，根据运行时的动态类型转换
+
+指针向上转型在`static_cast`和`dynamic_cast`都是有效的，即使没有cast，也会自动的转换
+
+```c++
+struct A{
+    int a;
+    virtual void f(){}
+};
+struct B: public A{
+    void f() override {}
+};
+struct C: public A{
+    void f() override {}
+};
+int main(){
+    A *a = new B;
+
+    if (B *b = static_cast<B*>(a); b != nullptr) { // b success
+        cout << "b success" << endl;
+    }
+    if (C *c = static_cast<C*>(a); c != nullptr) { // c success
+        cout << "c success" << endl;
+    }
+    return 0;
+}
+```
+
+`static_cast`可以用在隐式转换，如基本类型之间的转换。也可以用在类指针的向上转型（安全的），向下转型（不安全的）
+
+#### dynamic_cast
+
+>  用于含有**`虚函数`**的类之间向上、向下和侧向之间的转
+
+在不知道指针的动态类型时使用
+
+```c++
+struct A{
+    int a;
+    virtual void f(){}
+};
+struct B: public A{
+    void f() override {}
+};
+struct C{
+    virtual void f(){}
+};
+int main(){
+    A *a = new B;
+
+    if (B *b = dynamic_cast<B*>(a); b != nullptr) { // b success
+        cout << "b success" << endl;
+    }
+    if (C *c = dynamic_cast<C*>(a); c != nullptr) {
+        cout << "c success" << endl;
+    }
+    return 0;
+}
+```
+
+#### const_cast
+
+> 只能用于指针或引用，不可作用于函数指针和成员函数指针
+
+在有不同 cv 限定的类型间转换。
+
+```c++
+int i = 3;                 // 不声明 i 为 const
+const int& rci = i; 
+const_cast<int&>(rci) = 4; // OK：修改 i
+```
+
+#### reinterpret_cast
 
 `重新解释`，几乎什么都能转，但是可能会出问题。
 
-## Variadic Templates.可变参数模板
+### 3. 可变模板参数
 
 > 变化的是：1.参数的个数。2.参数的类型
 
@@ -2821,9 +3034,9 @@ void print(const T& firstArg, const Types&... args){ // 2
 }
 ```
 
-### 递归函数调用
+#### 递归使用方法
 
-入口函数
+##### 入口
 
 ```c++
 template<typename... Types>
@@ -2834,7 +3047,7 @@ inline size_t hash_val(const Types&... args){
 }
 ```
 
-递归函数
+##### 递归主体
 
 ```c++
 template<typename T, typename... Types>
@@ -2844,7 +3057,7 @@ inline void hash_val(size_t& seed, const T& val, const Types&... args){
 }
 ```
 
-出口函数
+##### 出口
 
 ```c++
 template<typename T>
@@ -2855,7 +3068,7 @@ inline void hash_val(size_t& seed, const T& val){
 
 **从入口函数进入，通过递归函数对参数包解包直到调用到出口函数为止**
 
-### 递归继承.Tuple
+#### 递归继承.Tuple
 
 ```c++
 template<typename... Values> class tuple;//泛化模板
@@ -2879,7 +3092,7 @@ protected:
 }
 ```
 
-### 示例1
+#### 示例1
 
 > 实现一个打印函数`print`：将任意类型任意个参数打印出来
 
@@ -2906,11 +3119,11 @@ void printX(){}
 printX(7.5, "hello", 1) // 输出: 7.5 hello 1
 ```
 
-### 示列2
+#### 示列2
 
 > 实现一个printf("%d..", ..)格式化输出函数
 
-### 示列4
+#### 示列4
 
 > 标准库`std::maximum`函数
 
@@ -2931,7 +3144,7 @@ int maximum(int n) {
 }
 ```
 
-### 示例5
+#### 示例5
 
 > 以异于一般的方式处理first元素和last元素
 
@@ -2957,24 +3170,7 @@ ostream& operator << (ostream& os, const tuple<Args...> &t) {
 略
 ```
 
-
-
-## `nullptr`, `auto`
-
-`nullptr`是一个**关键字**，它会**自动转换为对应的指针类型**。而`NULL`或`0`虽然能够代表空指针的含义，但实际上是整数类型。
-
-```c++
-void f(int);
-void f(void*);
-
-f(0);//调用f(int)
-f(NULL);//调用f(int) 
-f(nullptr); //调用f(void*)
-```
-
-函数`f(NULL)`表达的含义不清晰，`NULL`一般用作空指针。但其类型是整数类型0，因此编译器会将NULL当作整数类型。
-
-## 统一初始化
+### 4. 统一初始化
 
 直接在变量名后加大括号
 
@@ -2987,7 +3183,7 @@ vector<string> cities{"sdf", "af", "adsf"};
 编译器看到`{t1, ...,tn}`内部做出一个`initializer_list<T>`。 构造函数有一个版本接受这种形式。
 **如果构造函数中不接受这种形式，编译器会将`initializer_list<T>`拆解**，一个个丢进构造函数
 
-### Initializer List
+#### Initializer List
 
 ```c++
 int i; // 未定义
@@ -3033,99 +3229,15 @@ private:
 };
 ```
 
-## Range-based for statement
+### 5. Lambdas
 
-## `=default, =delete`
+Lambdas相当于一个匿名的**仿函数**，其返回值是一个对象
 
-强制加上`=default`, 重新获得并使用**默认函数**
+**语法**：$[...](...) mutable\ throwSpec\ \rightarrow retType \{...\}$
 
-```c++
-class Zoo
-{
-public:
-    Zoo(int i): _i(i){}
-    Zoo(Zoo&)=default;
-    Zoo(Zoo&&)=default;//move ctor
-    Zoo& operator=(const Zoo&)=default;
-}
+<img src="D:/mygit/notes/images/20220216094150.png" style="zoom: 50%;" />
 
-```
-
-### Big Three
-
-编译器为 **构造函数**、**赋值函数**、**析构函数**设置默认的函数
-
-### No Copy, NoDtor
-
-```c++
-struct NoCopy{
-    NoCopy(const NoCopy&)=delete;
-    NoCopy& operator()=(const NoCopy&)=delete;
-};
-```
-
-```c++
-struct PrivateCopy{
-private:
-    PrivateCopy(const PrivateCopy&);
-    PrivateCopy& operator()=(PrivateCopy NoCopy&);
-public:
-    ...
-}
-
-```
-
-## Alias
-
-### Alias Template
-
-`typedef`不接受参数
-
-```c++
-template<T>
-using vec=vector<T, myAlloc<T>>;
-```
-
-### Type Alias
-
-类似与typedef
-
-## noexpect
-
-函数后`noexpect`表示该函数不会发出异常
-
-```c++
-void foo() noexpect;等价于 void foo() noexpect(true)
-```
-
-## override
-
-让编辑器检查父类函数重写是否出错
-
-```c++
-class test{
-
-    virtual void funtion(int) override{};
-};
-```
-
-## final
-
-- 不允许父类被重写
-
-  ```c++
-    struct base final{};
-  ```
-
-- 不允许函数被重写
-
-  ```c++
-  struct test{
-      virtual void function() final;
-  };
-  ```
-
-## decltype
+#### `decltype` + `auto`
 
 得到一个表达式(可以是对象)的类型
 
@@ -3143,7 +3255,7 @@ decltype<mp>::value_type elem;
     auto add(T1 x, T2, y)->decltype(x + y);
   ```
 
-- 元编程中使用
+- 模板编程中使用
 
 - 传递lambda的类型
 
@@ -3157,21 +3269,14 @@ decltype<mp>::value_type elem;
   ```
 
 
-## Lambdas
 
-Lambdas相当于一个匿名的**仿函数**，其返回值是一个对象
-
-**语法**：[...](...) mutable throwSpec ->retType {...}
-
-![](D:/mygit/notes/images/20220216094150.png)
-
-## Rvalue references.右值引用
+### 6. 右值引用
 
 > 解决不必要的拷贝，但是它实际还是一个引用
 >
 > **用于含有指针的面向对象设计，避免重复copy指针内容**
 
-比如stl vector
+比如vector、string
 
 ```c++
 vector<A> res;
@@ -3184,15 +3289,15 @@ A a;
 res.push_back(a);
 ```
 
-### 拷贝构造与移动构造
+#### 拷贝构造与移动构造
 
 <img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220626211510971.png" alt="image-20220626211510971" style="zoom:50%;" />
 
 <img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220626211553608.png" alt="image-20220626211553608" style="zoom:50%;" />
 
-### 拷贝赋值与移动赋值
+#### 拷贝赋值与移动赋值
 
-### move aware class
+#### move aware class
 
 ```c++
 class String{
@@ -3237,6 +3342,172 @@ public:
     }
 };
 ```
+
+#### 完美转发.(常用于模板)
+
+> C++11 标准中规定，通常情况下右值引用形式的参数只能接收右值，不能接收左值。但对于**函数模板中使用右值引用语法**定义的参数来说，它不再遵守这一规定，**既可以接收右值，也可以接收左值（**此时的右值引用又被称为“**万能引用**”）。
+
+```c++
+template <typename T>
+void function(T&& t) {
+    otherdef(t);
+}
+```
+
+```c++
+int n = 10;
+int & num = n;
+function(num); // T 的类型是 int&
+int && num2 = 11;
+function(num2); // T 的类型是 int &&
+```
+
+C++ 11标准为了更好地实现完美转发，特意为其指定了新的类型匹配规则，又称为**引用折叠规则**（假设用 A 表示实际传递参数的类型）：
+
+- 当实参为左值或者左值引用（A&）时，函数模板中 T&& 将转变为 `A&`（A& && = A&）；
+- 当实参为右值或者右值引用（A&&）时，函数模板中 T&& 将转变为 `A&&`（A&& && = A&&）。
+
+
+
+c++11引入`std::forward`将函数模板接收到的参数类型一模一样地传递给被调用地函数
+
+```c++
+//实现完美转发的函数模板
+template <typename T>
+void function(T&& t) {
+    otherdef(forward<T>(t));
+}
+//重载被调用函数，查看完美转发的效果
+void otherdef(int & t) {
+    cout << "lvalue\n";
+}
+void otherdef(const int & t) {
+    cout << "rvalue\n";
+}
+```
+
+```c++
+function(5); // rvalue
+int  x = 1;
+function(x); // lvalue
+```
+
+
+
+### 7. `nullptr`
+
+`nullptr`是一个**关键字**，它会**自动转换为对应的指针类型**。而`NULL`或`0`虽然能够代表空指针的含义，但实际上是整数类型。
+
+```c++
+void f(int);
+void f(void*);
+
+f(0);//调用f(int)
+f(NULL);//调用f(int) 
+f(nullptr); //调用f(void*)
+```
+
+函数`f(NULL)`表达的含义不清晰，`NULL`一般用作空指针。但其类型是整数类型0，因此编译器会将NULL当作整数类型。
+
+### 8. 区间迭代
+
+>  Range-based for statement
+
+### 9. `=default, =delete`
+
+强制加上`=default`, 重新获得并使用**默认函数**
+
+```c++
+class Zoo
+{
+public:
+    Zoo(int i): _i(i){}
+    Zoo(Zoo&)=default;
+    Zoo(Zoo&&)=default;//move ctor
+    Zoo& operator=(const Zoo&)=default;
+}
+
+```
+
+#### Big Three
+
+编译器为 **构造函数**、**赋值函数**、**析构函数**设置默认的函数
+
+#### No Copy, NoDtor
+
+```c++
+struct NoCopy{
+    NoCopy(const NoCopy&)=delete;
+    NoCopy& operator()=(const NoCopy&)=delete;
+};
+```
+
+```c++
+struct PrivateCopy{
+private:
+    PrivateCopy(const PrivateCopy&);
+    PrivateCopy& operator()=(PrivateCopy NoCopy&);
+public:
+    ...
+}
+
+```
+
+### 10. Alias
+
+#### Alias Template
+
+`typedef`不接受参数
+
+```c++
+template<T>
+using vec=vector<T, myAlloc<T>>;
+```
+
+#### Type Alias
+
+类似与typedef
+
+### 11. noexpect
+
+函数后`noexpect`表示该函数不会发出异常
+
+```c++
+void foo() noexpect;等价于 void foo() noexpect(true)
+```
+
+### 12. `override`, `final`
+
+#### override
+
+让编辑器检查父类函数重写是否出错
+
+```c++
+class test{
+
+    virtual void funtion(int) override{};
+};
+```
+
+#### final
+
+- 不允许父类被重写
+
+  ```c++
+    struct base final{};
+  ```
+
+- 不允许函数被重写
+
+  ```c++
+  struct test{
+      virtual void function() final;
+  };
+  ```
+
+### 13. `std::function`
+
+> 类模板 `std::function` 是通用**多态函数**包装器
 
 
 
@@ -3515,25 +3786,90 @@ Facade模式可以为互相关联在一起的错综复杂的类整理出高层AP
 
 # 其他
 
-## C/C++程序编译过程
+## C/C++程序编译/链接模型
+
+> 所有东西放在一个文件中编译，使得编译速度太慢，修改一个地方就要整个重新编译。
+>
+> 编译/链接模型，**"分块处理"**，便于程序修改升级
+
+“分开处理”衍生概念:
+
+- 定义/声明
+- 头文件/源文件
+- 翻译单元
+  - 源文件 + 相关头文件（直接/间接） - 应忽略的预处理语句
+- 
 
 ### 预处理
 
-预处理器（cpp）根据以字符#开头的命令，修改原始的C程序。
+- 将源文件转换为翻译单元的过程
+- 防止头文件被循环展开
+  - `#ifdef` 
+  - `#pragma once`
+
 比如宏命令`#define a b`，将源程序中的所有替换为b
 `#include`命令将头文件的内容添加进来
 
+```bash
+gcc a.cpp -E -o a.i
+```
+
 ### 编译
 
-将处理后的文件通过词法和语法分析，最后编译为汇编代码
+- 将翻译单元通过**词法和语法分析**，转换为**汇编代码**
+- **编译优化**
+
+```bash
+gcc a.i -S -o a.s
+```
 
 ### 汇编
 
-将汇编代码翻译为机器指令的目标文件
+将汇编代码翻译为**机器指令**的目标文件
+
+```bash
+gcc a.s -c -o a.o
+```
 
 ### 链接
 
-合并目标代码生成一个可执行目标文件
+- 合并多个目标文件，关联声明与定义
+- 链接种类: 内部链接(定义只在翻译单元内部可见)、外部链接(在不同翻译单元可见)、无链接(同样的翻译单元也不可以见，如函数的局部变量)
+- 链接常见错误: 找不到定义
+
+变量、函数等分为声明和定义，一个文件中声明定义了，如果其他文件想要使用可以进行声明。在链接阶段，将这些声明关联上。
+
+```bash
+gcc a.o -
+```
+
+#### 静态链接
+
+在链接的时候将要调用的函数链接到了生成的可执行文件中
+
+**优点：**
+
+- 静态库整个打包到程序中，加载速度快
+- 发布程序不需要提供静态库，移植方便
+
+**缺点:**
+
+- 需要给更大的空间
+- 更新、部署、发布麻烦
+
+#### **动态链接**
+
+在链接的时候没有把调用的函数链接到文件中，而是在执行的过程中再去链接函数，生成的可执行文件中只包含函数的重定位信息
+
+**优点:**
+
+- 实现进程间共享动态库
+- 更新、部署、发布简单
+
+**缺点:**
+
+- 加载速度要比静态库慢
+- 发布程序时需要提供依赖的动态库
 
 ## 函数调用分析
 
