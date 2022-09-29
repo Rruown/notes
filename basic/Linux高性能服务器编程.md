@@ -192,6 +192,48 @@ ls -l >> 文件 # 追加写
 ln -s 原文件（目录） 连接名
 ```
 
+### 权限管理
+
+#### chmod
+
+> 修改文件/目录权限
+
+![image-20220827093257686](..\images\image-20220827093257686.png)
+
+> u：所有者，g：所有组，o：其他人，a：所有人（u+g+o）
+
+**第一个方式**
+
+```bash
+chmod [{ugo}{+-=}{rwx}] 文件或目录
+```
+
+**第二种方式**
+
+```bash
+chmod [mod=421] 文件或目录
+```
+
+#### chown
+
+> 修改所属者
+
+```bash
+chown [选项] 最终用户名 文件或目录
+```
+
+
+
+#### chgrp
+
+> 修改所属组
+
+```bash
+chrgp [选项] 最终所属组 文件或目录
+```
+
+
+
 ### 用户管理
 
 > /etc/passwd 
@@ -642,6 +684,7 @@ sort [OPTION] [FILE]
 ```
 
 - r: 反转排序结果
+- k：通过key排序，1表示第1列，2表示第2列
 
 ## Linux开发环境搭建
 
@@ -809,80 +852,6 @@ add_executable(可执行文件名 main.cxx)
 target_link_libraries(可执行文件名 链接库)
 ```
 
-## [GoogleTest](https://google.github.io/googletest/)
-
-
-
-gtest的好处:
-
-- 当测试失败时，gtest允许隔离运行它以进行快速调试。
-- gtest井井有条，并反映已测试代码的结构。
-- gtest可移植
-- gtest在第一次测试失败时不会停止。相反，它只能停止当前测试，并继续下一个测试。您还可以设置报告非致命故障的测试，然后进行当前测试。因此，您可以在单个编辑过程中检测和修复多个错误。
-- gtest会**自动跟踪所有定义的测试**，并且不需要用户枚举它们以运行它们。
-- 使用gtest，可以在测试中重复使用共享资源，而不是让测试相互依赖。
-
-test suite包含一个或多个test。您应该将test放入test suite分组以反映测试代码结构的测试套件中。
-
-一个测试程序包含多个test suite
-
-### Assertion基础
-
-`ASSERT_*`断言失败时将立刻从当前结束，可能会跳过清理代码从而造成内存泄漏
-
-`EXPECT_*`断言允许多个错误
-
-
-
-使用`<<`符号以自定义错误报告
-
-
-
-**测试程序异常：**
-
-```c++
-EXPECT_DEATH // 程序奔溃
-EXPECT_EXIT // 程序退出
-EXPECT_THROW // 抛出异常
-```
-
-
-
-### Test Fixtures
-
-如果编写了两个或多个在类似数据上运行的测试，则可以使用test fixture。可以重用对象的相同配置进行多个不同的测试。
-
-**创建一个fixture：**
-
-- 创建一个类继承自`::testing::Test`，body部分使用`protected`，gtest将从子类访问成员
-- 定义默认构造函数或`SetUp()`函数
-- 定义析构函数或`TearDown()`函数
-
-**使用fixture**
-
-```c++
-TEST_F(TestFixtureName, TestName) {
-  ... test body ...
-}
-```
-
-当测试运行时，gtest将创建一个TestFixtureName对象t1，用SetUp函数初始化t1，测试，用TearDown函数并销毁t1
-
-**main()函数**
-
-大多数情况下不需要自己写`main`函数，它们会链接到`gtest_main`。如果要写自己的main函数必须要返回`RUN_ALL_TESTS()`的值
-
-```c++
-int main(int argc, char **argv) {
-  // The ::testing::InitGoogleTest() function parses the command line for googletest flags, 
-  // and removes all recognized flags.
-  ::testing::InitGoogleTest(&argc, argv); 
-  return RUN_ALL_TESTS();
-}
-```
-
-
-
 ## 文件描述符
 
 PCB（进程控制块）存放在内核区，其中存放了**文件描述符表**
@@ -1007,7 +976,7 @@ int stat(const char *pathname, struct stat *statbuf);
 
 
 
-### **lseek函数**：
+### **lseek函数**
 
 ```c
   #include <sys/types.h>
@@ -1132,7 +1101,7 @@ int execlp(const char *file, const char *arg, ...)//p(path) 存有各参数地�
 
 孤儿进程：子进程尚未运行结束，但父进程已经运行结束了。将子进程的管理委托给init进程。无危害
 
-僵尸进程：子进程结束后，父进程还未回收子进程的PCB资源。有危害
+僵尸进程：子进程结束后，父进程还未来得及回收子进程的PCB资源。有危害
 
 ```c
 #include <sys/types.h>
@@ -1175,17 +1144,33 @@ pid_t waitpid(pid_t pid, int *wstatus, int options);
 
 ## 进程通信
 
-### 匿名管道
+### 1. 匿名管道
 
 UNIX 系统 IPC （进程间通信）的最古老形式
 
-#### 管道的特点
+#### 基本原理
 
-1.**半双工**：在管道中的数据的传递方向是单向的，一端用于写入，一端用于读取
+管道是内核空间的缓存区，由写端描述符和读端描述符
 
-2.匿名管道**只能在具有公共祖先的进程**（父进程与子进程，或者两个兄弟进程，具有亲缘关系）之间使用。
+> **猜测**：内核空间中有一个数组是从描述符到缓存区地址的映射
 
-> fork函数创建一个子进程，父进程与子进程**共享用户地址空间**。所以父进程中创建一个管道，拿到管道**读端和写端**，同样子进程也会拥有管道读端和写端。
+
+
+通信原理依赖于**子进程会复制父进程的虚拟地址空间**
+
+#### 优点
+
+- 简单方便
+
+#### 缺点
+
+- **半双工**：在管道中的数据的传递方向是单向的，一端用于写入，一端用于读取。全双工通信，需要两个管道
+- 匿名管道**只能在具有公共祖先的进程**（父进程与子进程，或者两个兄弟进程，具有亲缘关系）之间使用。
+
+- 存在**用户态到内核态的数据拷贝开销**
+- **只能以先进先出的方式接受数据**
+
+#### 使用样例
 
 ```c
 #include <unistd.h>
@@ -1201,20 +1186,70 @@ int pipe(int pipefd[2]);
 
 ```
 
-### 有名管道
+Shell中的`|`就是一种匿名管道，每个Shell初始化的时候就创建了一个匿名管道。
+
+```bash
+ls -al | grep test
+```
+
+
+
+### 2. 有名管道
 
 >  **注意**：一个为只读打开管道的进程会被阻塞，直到另一个进程为只写打开管道；一个为只写打开管道的进程会被阻塞，直到另一个进程为只读打开管道；
 
+#### 基本原理
 
-有名管道是一个特殊的文件（伪文件-不占用硬盘的空间，只是在内存中作用。通过内核去管理调用）。
+有名管道是一个**特殊的文件**（伪文件-不占用硬盘的空间，只是在内存中作用。通过内核去管理调用）。
 
-#### 有名管道的特点
+#### 优点
 
-1. 不存在亲缘关系的进程，可以通过 FIFO 相互通信（相当于读写文件一样）
+- 相比于匿名管道。不存在亲缘关系的进程，可以通过 FIFO 相互通信（相当于读写文件一样）
 
-### 消息队列
+#### 缺点
 
-#### **创建队列**
+- **半双工**：在管道中的数据的传递方向是单向的，一端用于写入，一端用于读取。全双工通信，需要两个管道
+
+- 存在**用户态到内核态的数据拷贝开销**
+- **只能以先进先出的方式接受数据**
+
+#### 使用样例
+
+`mkfifo [option]... NAME...`创建有名管道
+
+
+
+### 3. 消息队列
+
+#### 基本原理
+
+**消息队列是保存在内核中的消息链表**。消息体是实现约定好的数据结构，并且**消息体必须要有类型号**（>=0）。接收方可以从消息队列中有选择地读取消息体。
+
+#### 优点
+
+- 可以用在不同的进程之间通信（针对于匿名管道）
+- 可以有**选择**的读取消息（针对于管道通信）
+- 全双工通信（针对于管道通信）
+
+#### 缺点
+
+- 会造成**通信不及时**
+- **消息队列不适合比较大数据的传输**，因为在内核中每个消息体都有一个最大长度的限制，同时所有队列所包含的全部消息体的总长度也是有上限。
+- **存在用户态与内核态之间的数据拷贝开销**
+
+#### 使用样例
+
+#### 消息的数据格式
+
+```c
+struct Msg{
+     long type; // 消息类型。这个是必须的，而且值必须 > 0，这个值被系统使用
+     // 消息正文，多少字节随你而定
+     // ...
+ };
+```
+
+##### **创建队列**
 
 ```c++
 #include <sys/types.h>
@@ -1222,7 +1257,6 @@ int pipe(int pipefd[2]);
 #include <sys/msg.h>
 
 int msgget(key_t key, int msgflg);
-
 
 ```
 
@@ -1236,7 +1270,7 @@ int msgget(key_t key, int msgflg);
 - 成功msgget将返回一个非负整数，即该消息队列的标识码；
 - 失败则返回“-1”
 
-#### **添加消息**
+##### **发送消息**
 
 ```c++
 int  msgsnd(int msgid, const void *msg_ptr, size_t msg_sz, int msgflg);
@@ -1256,7 +1290,7 @@ int  msgsnd(int msgid, const void *msg_ptr, size_t msg_sz, int msgflg);
 - 成功返回0
 - 失败则返回-1
 
-#### 读取消息
+##### 读取消息
 
 ```c++
 int  msgrcv(int msgid, void *msg_ptr, size_t msgsz,
@@ -1281,7 +1315,7 @@ int  msgrcv(int msgid, void *msg_ptr, size_t msgsz,
 - 成功返回实际放到接收缓冲区里去的字符个数
 - 失败，则返回-1
 
-#### 消息队列控制
+##### 消息队列控制
 
 ```c++
 int  msgctl(int msqid, int command, strcut msqid_ds *buf);
@@ -1295,25 +1329,30 @@ int  msgctl(int msqid, int command, strcut msqid_ds *buf);
   - IPC_SET
   - IPC_
 
-### 内存映射
+### 4. 共享内存
+
+#### 内存映射
+
+> mmap函数用于申请一段内存空间。munmap函数则用于释放mmap创建的这段内存空间。
 
 ```c
 #include <sys/mman.h>
 
-void *mmap(void *addr, size_t length, int prot, int flags,int fd, off_t offset);
+void *mmap(void *start, size_t length, int prot, int flags,int fd, off_t offset);
 /*
-    在进程的虚拟地址空间创建文件的内存映射
+    在进程的虚拟地址空间创建文件的内存映射或申请一段内存空间
     参数: 
-        addr: NULL表示由操作系统指定映射区
-        length: 映射区大小
-        prot: 映射区的读写权限
+        start: 允许用户使用某个特定的地址作为这段内存的起始地址。NULL表示由操作系统指定映射区，
+        length: 内存段的长度
+        prot: 内存段的权89限
               PROT_EXEC  Pages may be executed.
               PROT_READ  Pages may be read.
               PROT_WRITE Pages may be written.
               PROT_NONE  Pages may not be accessed.
         flags: 
-              MAP_SHARED: 表示内存映射区与磁盘文件同步(进程通信必选)
-              MAP_PRIVATE: 表示不同步
+              MAP_SHARED: 在进程间共享这段内存，对该都内存段的修改将反映到被映射的文件中。
+              MAP_PRIVATE: 内存段为进程所私有
+              MAP_ANONYMOUS: 表示这段内存不是从文件映射来的。其内容被初始化为全0。在这种情况下，后面两个参数可以被忽略
         fd: 映射的文件描述符
         offset: 0， 一般不指定
     返回值:
@@ -1328,9 +1367,13 @@ int munmap(void *addr, size_t length);
 */
 ```
 
-### 信号
+### 5. 信号
 
-信号是事件发生时对进程的通知机制，有时也称之为**软件中断**，它是在软件层次上对中断机制的一种模拟，是一种**异步通信**的方式。
+> 中断机制——由设备硬件发送中断信号，cpu在每个指令周期结束后，会检查中断寄存器中的内容。
+>
+> 信号——由内核向进程注册信号（PCB（`task_struct`中有两个数据成员即未决信号集和阻塞信号集）），如果进程处于阻塞状态，则内核唤醒进程，然后内核向正在运行的进程发送中断，处理信号
+
+信号是事件发生时对进程的通知机制，有时也称之为**软件中断**，它是在**软件层次上对中断机制的一种模拟**，是一种**异步通信**的方式。
 
 **使用信号的两个主要目的**是：
 
@@ -1416,7 +1459,17 @@ int sigpending(sigset_t *set);
 
 #### 信号捕捉过程
 
-<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220630195123139.png" alt="image-20220630195123139" style="zoom: 50%;" />
+<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220823095643667.png" alt="image-20220823095643667" style="zoom: 67%;" />
+
+
+
+#### 优点
+
+- 异步通信机制
+
+  
+
+### 6. socket套接字
 
 # 线程
 
@@ -1469,6 +1522,8 @@ int pthread_detach(pthread_t thread);
 - 功能: 分离一个线程，该线程资源由系统自动回收。
 - 注意点: 不可以重复分离一个线程，不可以连接已经分离的线程
 
+**线程运行结束后，系统自动回收资源，解决了僵尸线程。但是一旦主线程退出则进程退出，子线程可能也不会运行**
+
 ## 线程取消
 
 ```c
@@ -1476,6 +1531,16 @@ int pthread_cancel(pthread_t thread);
 ```
 
 - 功能：取消一个线程
+
+## 线程join
+
+```c++
+int pthread_join()
+```
+
+- 功能：等待线程执行结束，回收线程资源
+
+**解决了僵尸线程问题，但是主线程会阻塞**
 
 ## 线程属性
 
@@ -1532,7 +1597,9 @@ sem_xxx
 
 ## socket
 
-在Linux环境下，`socket`用来表示进程间网络通信的特殊文件类型（伪文件）。
+> 在Linux环境下，`socket`用来表示进程间网络通信的特殊文件类型（伪文件）。
+>
+> socket是内核当中的缓存区，有发送和接受缓存区，用套接字标识
 
 ```c
 主机A——socket
@@ -1813,11 +1880,24 @@ I/O多路复用使程序能够同时监听多个文件描述符，能够提高�
 
 > 一次I/O经历**数据准备**和**数据读写**
 
-**1. 阻塞等待.BIO**
+#### **1. 阻塞等待.BIO**
+
 比如`receive`、`accept`函数
 
-- 优点：不占用CPU资源
-- 缺点: 同一时刻只能处理一个操作，效率低 **(多线程解决，每个线程负责监听一个套接字)**
+##### 基本概念
+
+比如，使用`read`系统调用，进程会被阻塞，直到**数据准备好**，内核将数据从内核区拷贝到用户区
+
+##### 优点
+
+- 不占用CPU资源
+
+##### 缺点
+
+- 同一时刻只能处理一个操作，效率低 **(多线程解决，每个线程负责监听一个套接字)**
+- 有一定的**线程切换**开销
+
+##### 使用样例
 
 ```c
 //服务端
@@ -1828,12 +1908,25 @@ int cfd = accept(lfd, ...);//阻塞
 receive(cfd,...)//阻塞
 ```
 
-**2. 非阻塞，忙轮询.NIO**
+#### **2. 非阻塞，忙轮询.NIO**
 
-不阻塞，每个一段时间询问一次。对于多个任务，需要依次遍历任务
+##### 基本概念
 
-- 优点：提高程序执行效率
-- 缺点：需要占用更多的CPU资源
+**数据未准备好**时不阻塞线程，而是直接返回-1，`errno`会被设置为EWOULDBLOCK或EAGAIN。
+
+轮询重试，直到**数据准备好**时，内核将数据从内核区拷贝到用户区
+
+##### 优点
+
+- 没有额外线程切换的开销，适用于频繁的网络I/O
+
+##### 缺点
+
+- 同一时刻只能处理一个操作
+
+- 需要占用更多的CPU资源
+
+##### 使用样例
 
 ```c
 //服务端
@@ -1851,9 +1944,25 @@ else:
   do others
 ```
 
-**3. IO复用**
+#### **3. IO复用**
 
-由一个线程监听多个套接字，这样只需要一个线程完成数据状态轮询的操作。当有数据准备好后再分配对应的线程去处理数据。
+> 由一个线程监听事件的发生，再将所有发生的事件交给主线程处理
+
+##### 基本概念
+
+由内核检测是否有数据准备好。
+
+如`select`系统调用，内核以轮询的方式遍历监听socket集合，只要有socket的数据准备好，就记录下准备好的socket，最后返回用户态。
+
+##### 优点
+
+- 一次可以处理多个操作
+
+##### 缺点
+
+
+
+##### 使用样例
 
 
 
@@ -1866,9 +1975,17 @@ epoll 委托内核检测是否有数据到达。返回几个数据到达，并�
 
 
 
-**4. AIO**
+#### **4. 信号驱动IO**
 
-**5. 信号驱动**
+##### 基本概念
+
+信号驱动IO不再用主动询问的方式去确认数据是否就绪，而是向内核注册SIGIO的信号处理程序(调用`sigaction`的时候建立一个SIGIO的信号)，然后应用用户进程可以去做别的事，不用阻塞。当内核数据准备好后，再通过`SIGIO`信号通知应用进程，数据准备好后的可读状态。应用用户进程收到信号之后，立即调用recvfrom，去读取数据。	
+
+#### **5. AIO**
+
+
+
+
 
 ### select
 
@@ -1914,7 +2031,6 @@ void FD_ZERO(fd_set *set);
 **缺点**：
 
 - 每次调用select，都需要将**fd集合从用户态拷贝到内核态，再拷贝回来**，需要一定开销
-- 忙轮询监听fd集合，需要时间开销
 - select**只支持1024个文件描述符数量**
 - fds集合不能重用，每次都需要重置
 
@@ -1948,6 +2064,55 @@ int poll(struct pollfd *fds, nfds_t nfds, int timeout);
 `poll`改进了`select`的第三和第四个缺点
 
 ### epoll
+
+#### 基本原理
+
+##### file_operations
+
+Linux对文件的操作做了很高层的抽象，它并不知道每个文件应该如何打开、读写，Linux让每种设备类型自己实现`struct file_operations`结构体中定义的函数
+
+```c
+struct file_operations{
+    loff_t (*llseek) (struct file *, loff_t, int);
+    ssize_t (*read)(struct file*, char _user*, size_t, loff_t *);
+    ssize_t (*write)(struct file*, const char __user*, size_t, loff_t *);
+    unsigned int (*poll) (struct file*, struct poll_table_struct *);
+}
+```
+
+`poll`主要做两件事：
+
+- 将当前线程加入到设备驱动的等待队列，并设置回调函数。这样设备上有事件发生时才知道唤醒通知哪些线程，调用这些线程的什么方法
+- 检查此刻已经发生的事件，POLLIN、POLLOUT、POLLERR等，以掩码的形式返回
+
+##### 等待队列
+
+等待队列的功能时将进程（`task_struct`）加入设备的等待队列，等超时或有事件发生时，唤醒进程并回调特定回调钩子函数。
+
+当执行`epoll_wait`时，实际上就是将当前进程加入到设备fd的等待队列上
+
+<img src="..\images\image-20220827112646124.png" alt="image-20220827112646124" style="zoom: 50%;" />
+
+##### epoll工作流程
+
+<img src="..\images\vBY6AT7enLNC4IA.png" alt="img" style="zoom: 67%;" />
+
+`epoll_create`在内核创建一个`eventepoll`对象，包含一个等待队列，一个就绪的文件列表，一个红黑树（管理监听的文件事件）。
+
+`epoll_ctl`在红黑树插入/删除`epitem`(监听的文件描述符及事件)，并调用socket文件的`poll`函数，将`epitem`添加到对应的等待队列并设置回调函数。
+
+`epoll_wait`如果就绪文件列表中没有数据就会阻塞，否则就返回。当文件描述符的事件发生后，内核将调用对应等待队列中的回调函数，这个回调函数会将`epitem`加入到就绪文件描述符列表中
+
+##### epoll
+
+想要支持`epoll`等函数，文件类型就必须要实现`file_operations`函数列表里的`poll`
+
+`poll`函数的作用是：
+
+- 将当前线程加入到设备驱动的等待队列，并设置回调函数。这样设备上有事件发生时才知道唤醒通知哪些线程，调用这些线程的什么方法
+- 检查此刻已经发生的事件,POLLIN、POLLOUT、POLLERR等，以掩码的形式返回
+
+#### 使用样例
 
 1. **零拷贝**：`epoll_create`系统调用在内核区创建一个eventpoll（结构体）， 避免了select/poll将fds从用户区拷贝内核区的开销
 2. `epoll_ctl`注册需要检测（监听）的事件（对文件描述符读/写的监听）
@@ -1995,7 +2160,7 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 当`epoll_wait`检测到其上有事件发生并将此事件通知应用程序后，应用程序可以不立即处理该事件。当应用程序下一次调用`epoll_wait`时，`epoll_wait`还会再次向应用
 程序通告此事件，直到该事件被处理。
 
-#### ET.边缘出发
+#### ET.边缘触发
 
 当`epoll_wait`通知的后，应用程序必须要处理，因为后续调用`epoll_wait`将不再通知该事件
 
@@ -2042,7 +2207,7 @@ while (true) {
 
 ## 服务器编程基本框架
 
-<img src="D:\mygit\notes\images\20220615194449.png" style="zoom: 50%;" />
+<img src="..\images\20220615194449.png" style="zoom: 50%;" />
 
 **I/O处理单元: **处理客户端连接，接收发送网络数据
 
@@ -2064,9 +2229,11 @@ I/O处理单元是服务器管理客户端连接的模块，主要负责等待�
 
 #### Reactor模式（重点）
 
-主线程（I/O处理单元）只负责监听文件描述符上是否有事件发生，将事件添加到请求队列并通知子线程处理事件。数据的读写，接收新的连接以及处理请求均由工作线程独立完成。
+##### 单Reactor多线程模型
 
-<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220615202556392.png" alt="image-20220615202556392" style="zoom:50%;" />
+主线程（I/O处理单元）只负责监听文件描述符上是否有事件发生，将事件的任务添加到请求队列并通知子线程处理事件。数据的读写，接收新的连接以及处理请求均由工作线程独立完成。
+
+<img src="..\images\image-20220615202556392.png" alt="image-20220615202556392" style="zoom:50%;" />
 
 **使用同步I/O模型实现Reactor模式的工作流程：**
 
@@ -2078,11 +2245,15 @@ I/O处理单元是服务器管理客户端连接的模块，主要负责等待�
 6. 当事件发生时，epoll_wait通知主线程。主线程将socket“可写事件”插入请求队列
 7. “可写事件”请求队列上的线程被唤醒，往socket上写入服务器处理客户请求的结果。
 
+###### 优点
+
+- **单Reator多线程（本项目使用的方案）**的方案优势在于**能够充分利用多核 CPU 的性能**
+
 #### proactor模式
 
 与Reactor模式不同，Proactor模式将所有I/O操作都交给**主线程**和**内核**来处理，工作线程仅仅负责业务逻辑
 
-![image-20220708133352230](D:\mygit\notes\images\image-20220708133352230.png)
+![image-20220708133352230](..\images\image-20220708133352230.png)
 
 **使用异步I/O模型（以aio_read和aio_write为例）实现的Proactor模式的工作流程是：**
 
@@ -2101,12 +2272,65 @@ I/O处理单元是服务器管理客户端连接的模块，主要负责等待�
 
 
 
+## 日志系统
+
+`rsyslogd`守护进程既能接收用户进程输出的日志，又能接收内核日志。用户进程是通过调用syslog函数生成系统日志的。该函数将日志输出到一个UNIX本地域socket类型（AF_UNIX）的文件/dev/log中， rsyslogd则监听该文件以获取用户进程的输出。
+
+
+
+`syslog`函数
+
+```c++
+#include＜syslog.h＞
+void syslog(int priority,const char*message,...);
+
+// 优先级选项
+#include＜syslog.h＞
+#define LOG_EMERG 0/*系统不可用*/
+#define LOG_ALERT 1/*报警，需要立即采取动作*/
+#define LOG_CRIT 2/*非常严重的情况*/
+#define LOG_ERR 3/*错误*/
+#define LOG_WARNING 4/*警告*/
+#define LOG_NOTICE 5/*通知*/
+#define LOG_INFO 6/*信息*/
+#define LOG_DEBUG 7/*调试*/
+
+```
+
+此外，**日志的过滤也很重要**。程序在开发阶段可能需要输出很多调 试信息，而发布之后我们又需要将这些调试信息关闭。解决这个问题的 方法并不是在程序发布之后删除调试代码（因为日后可能还需要用 到），而是简单地设置日志掩码，使日志级别大于日志掩码的日志信息 被系统忽略。下面这个函数用于设置syslog的日志掩码：
+
+```c++
+#include＜syslog.h＞
+int setlogmask(int maskpri);
+```
+
+### **Where：不清楚在何处打印日志**
+
+  **1.程序入口**:在入口打印日志是因为这个时候传递进来的参数没有经过任何处理，将它打印在日志文件中能一眼就知道程序的原始数据是否符合我们的预期，是不是传递进来的原始数据就出现 的问题。
+
+　**2.异常捕获**
+
+　**3.重要信息**
+
+### **Who：不清楚打印什么级别的日志**
+
+**INFO级别的日志应该是能帮助测试人员判断这是否是一个真正的bug，而不是自己操作失误造成的。**
+
+**DEBUG级别的日志应该是能帮助开发人员分析定位bug所在的位置。**
+
+**ERROR级别的日志最为常见的就是捕获异常时所打印的日志。**
+
+### **What：不清楚日志应该包含什么内容**
+
+打印的内容一定要从实际出发。也就是说如果在实际的生产环境中，你的用户量很大，日志在不停地刷新，如何定位某个用户的整个登录以及后续的操作呢？当然就是根据用户名来跟踪。所以打印内容的第一要素就是要能便于定位；定位过后也许用户在好几个模板中进行操作，还是定位，这个时候定的是模块的位；还有一点当然就是用户操作时的具体参数；最后一点就是用户干了什么。
+
+　　总结就是，[id, module, params, content]（关键字，模块，参数，内容）
+
 ## 定时器
 
 定时事件，比如定期检测一个客户连接的活动状态。
 
-将每个定时事件分别封装成定时器，并使用某种容器类数据结构，比如链表、排序链表和时间轮，将所有定时器串联起来，以实现对定时事件的统一
-管理。
+将每个定时事件分别封装成定时器，并使用某种容器类数据结构，比如链表、排序链表和时间轮，将所有定时器串联起来，以实现对定时事件的统一管理。
 
 ### 定时方法
 
@@ -2119,7 +2343,7 @@ I/O处理单元是服务器管理客户端连接的模块，主要负责等待�
 int ret = setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, ＆timeout, len); // 设置sockfd的发送数据超时时间
 ```
 
-**2.SIGALRM信号**
+**`2.SIGALRM信号`**
 
 由`alarm`和`setitimer`函数设置的实时闹钟一旦超时，将触发SIGALRM信号。利用该信号的信号处理函数来处理定时任务。
 
@@ -2135,11 +2359,133 @@ unsigned int alarm(unsigned int seconds);
 */
 ```
 
+**注册alrm信号处理函数**
+
+```c++
+// 添加信号捕捉
+void add_sig(int sig, void(handler)(int)) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof (sa));
+    sa.sa_handler = handler;
+    sigfillset(&sa.sa_mask);
+    sigaction(sig, &sa, NULL);
+}
+```
+
+**时间堆**
+
+```c++
+class timer{
+    
+    void add_timer(int,...) {
+        // 如果堆中没有该节点，则加入
+        // 如果堆中已经有这个节点，则更新过期时间，向下调整。
+    }
+    void tick(){ // alarm信号处理函数中放置的函数
+        ...
+        // 从堆中取出最早过期时间，执行它的回调函数（释放连接）
+        ...
+    }
+};
+```
+
+
+
 **3.I/O复用系统调用的超时参数**
 
 Linux下的3组I/O复用系统调用都带有超时参数，因此它们不仅能统一处理信号和I/O事件，也能统一处理定时事件。
 
+## 无锁编程
+
+### C++内存模型
+
+> 通过保证操作顺序，间接保证了可见性
+
+| `memory_order_relaxed` | 宽松操作：没有同步或顺序制约，仅对此操作要求原子性。         |
+| ---------------------- | ------------------------------------------------------------ |
+| `memory_order_consume` | 有此内存顺序的加载操作，在其影响的内存位置进行*消费操作*：当前线程中依赖于当前加载的该值的读或写不能被重排到此加载前。其他释放同一原子变量的线程的对数据依赖变量的写入，为当前线程所可见。 |
+| `memory_order_acquire` | 有此内存顺序的加载操作，在其影响的内存位置进行*获得操作*：当前线程中读或写不能被重排到此加载前。其他释放同一原子变量的线程的所有写入 |
+| `memory_order_release` | 有此内存顺序的存储操作进行*释放操作*：当前线程中的读或写不能被重排到此存储后。当前线程的所有写入，可见于获得该同一原子变量的其他线程（见下方[释放获得顺序](https://zh.cppreference.com/w/cpp/atomic/memory_order#.E9.87.8A.E6.94.BE.E8.8E.B7.E5.BE.97.E9.A1.BA.E5.BA.8F)），并且对该原子变量的带依赖写入变得对于其他消费同一原子对象的线程可见（见下方[释放消费顺序](https://zh.cppreference.com/w/cpp/atomic/memory_order#.E9.87.8A.E6.94.BE.E6.B6.88.E8.B4.B9.E9.A1.BA.E5.BA.8F)）。 |
+| `memory_order_acq_rel` | 带此内存顺序的读修改写操作既是*获得操作*又是*释放操作*。当前线程的读或写内存不能被重排到此存储前或后。所有释放同一原子变量的线程的写入可见于修改之前，而且修改可见于其他获得同一原子变量的线程。 |
+| `memory_order_seq_cst` | 有此内存顺序的加载操作进行*获得操作*，存储操作进行*释放操作*，而读修改写操作进行*获得操作*和*释放操作*，再加上存在一个单独全序，其中所有线程以同一顺序观测到所有修改 |
+
+<img src="..\images\image-20220901140706228.png" alt="image-20220901140706228" style="zoom: 50%;" />
+
+### 无锁的同步队列
+
+**如何实现一个“多进多出的无锁队列”？**
+
+- 读线程和读线程之间使用`atomic<int> hh`避免冲突
+- 写线程和写线程之间使用`atomic<int> tt`避免冲突
+- 读线程和写线程使用`atomic<bool> full`避免冲突，每个元素都有一个`atomic<bool> full`，full是false不能读。full是true不能写
+
+**编译器优化：**
+
+- 有依赖关系的读写操作，编译器优化后依旧保证其顺序
+
+`aotmic`底层应该由`CAS`实现，可以使用`compare_exchange_weak`尝试修改值。`CAS`是乐观锁的另一种实现技术，当多个线程尝试使用`CAS`同时更新同一个变量时，只有其中一个线程能更新变量的值，而其它线程都失败，失败的线程并不会被挂起，而是被告知这次竞争中失败，并可以再次尝试。
+
+
+
+**`compare_exchange_weak`与`compare_exchange_strong`区别：**
+
+weak性能与strong要高，所以weak和strong的区别在于，weak仍然在`*ptr == expected`的时候，执行依然会有小概率失败。也就是说， 即使`*ptr == expected`，此时也不会发生值的设置，也会返回`false`。（不会是设置成功了，但是返回的是false）。
+
+
+
+**无锁队列的`push`实现：**
+
+```c++
+bool put(const T &value) {
+        size_t _tt = 0;
+        do {
+            _tt = tt.load(std::memory_order_relaxed);
+            if ((_tt + 1) >= hh.load(std::memory_order_relaxed)) {
+                return false;
+            }
+            if (_data[_tt].full.load(std::memory_order_relaxed)){
+                return false;
+            }
+        }
+        while (!tt.compare_exchange_weak(_tt, _tt + 1, std::memory_order_release, std::memory_order_relaxed));
+
+        _data[_tt].data = std::move(value);
+        _data[_tt].full.store(true, std::memory_order_release);
+        return false;
+}
+```
+
+**无锁队列的`take`实现：**
+
+```c++
+bool take(T &value) {
+        size_t _hh = 0;
+        do {
+            _hh = hh.load(std::memory_order_relaxed);
+            if (_hh == tt.load(std::memory_order_relaxed)) {
+                return false;
+            }
+            if (!_data[_hh].full.load(std::memory_order_relaxed)){
+                return false;
+            }
+        }
+        while (!tt.compare_exchange_weak(_hh, _hh + 1, std::memory_order_release, std::memory_order_relaxed));
+        
+        value = std::move(_data[_hh].data);
+        _data[_hh].full.store(false, std::memory_order_release);
+        return false;
+}
+```
+
+
+
 ## 服务压力测试
+
+### 修改linux系统用户资源限制
+
+ulimit：显示（或设置）用户可以使用的资源的限制（limit），这限制分为软限制（当前限制）和硬限制（上限），其中硬限制是软限制的上限值，应用程序在运行过程中使用的系统资源不超过相应的软限制，任何的超越都导致进程的终止。
+
+### Webbench
 
 Webbench 是 Linux 上一款知名的、优秀的 web 性能压力测试工具。它是由Lionbridge公司开发。
 
@@ -2167,6 +2513,607 @@ webbench -c 1000 -t 30 http://192.168.110.129:10000/index.html
 | 阻塞队列 | 9513 | 9630  | 11.8   | 16.3 (超负荷) |
 | 无锁队列 | 6861 | 11000 | 50.6   | 70.6 (超负荷) |
 |          | -28% | 14.2% | 328.8% | 333.1%        |
+
+
+
+# 软件测试
+
+## 软件测试的目的
+
+尽可能的发现错误
+
+**软件测试应贯穿于软件定义与开发的整个期间**。需求分析、概要设计、详细设计以及程序编码等各阶段所得到的文档，包括需求规格说明、概要设计规格说明、详细设 计规格说明以及源程序，都应成为软件测试的对象
+
+## 软件测试的方法
+
+### 从是否关心软件内部结构和具体实现角度分类
+
+#### 黑盒方法
+
+将测试对象看作黑盒子，测试人员不需要考虑程序内部的逻辑结构和内部特性。黑盒测试又叫功能测试或者数据驱动测试。
+
+**1.等价类**
+
+测试的目的是进行**完备的测试**，**同时避免测试用例冗余**
+
+**等价类是指**在该子集合中，各个输入数据对于找出程序bug的能力是等效的。
+
+等价类分为**有效等价类**、**无效等价类**
+
+> **等价类测试的关键，就是选择确定的等价关系，必须区分弱和强等价类**
+
+**2.边界值**
+
+> 从测试工作经验得知，**大量的错误是发生在输入或输出范围的边界上，而不是在输入范围的内部**
+
+**3.决策表**
+
+#### 白盒方法
+
+将测试对象看作一个透明的盒子，允许测试人员利用程序内部逻辑设计测试用例。白盒测试又叫结构测试或逻辑驱动测试。
+
+测试覆盖代码、分支、路径和条件
+
+
+
+逻辑覆盖可分为：
+
+**1.语句覆盖**
+
+每条语句至少执行一次
+
+**2.分支覆盖**
+
+每条判定的分支至少执行一次
+
+**3.条件覆盖**
+
+分支判定语句中包含多个条件，每个条件至少执行一次
+
+**4.分支条件覆盖**
+
+选取足够多的测试数据，使判断中每个条件都取得各种可能值，并使每个判断表达式也取到各种可能的结果。
+
+**5.条件组合覆盖**
+
+使得每个判断中条件的各种可能组合都至少出现一次
+
+**6.路径覆盖**
+
+程序图/控制流图中的所有路径至少执行一次
+
+### 从软件测试过程角度分类
+
+#### 单元测试
+
+白盒测试的一种，对软件设计中的单元模块进行测试
+
+#### 集成测试
+
+在单元测试的基础上，对单元模块之间的连接和组装进行测试。
+
+#### 系统测试
+
+应用整体运行时的测试阶段
+
+#### #负载测试
+
+通过逐步增加系统负载，最终确定在满足性能指标的情况下，系统能够承受的最大负载量的测试。
+
+#### #强度测试
+
+#### #容量测试
+
+#### #压力测试
+
+## 软件测试的步骤
+
+开始是单元测试，集中对用源代码实现的每一个程序单元进行测试，检查各个程序模块是否正确地 实现了规定的功能。 
+
+3) 集成测试把已测试过的模块组装起来，主要对与设计相关的软件体系结构的构造进行测试。 
+4) **确认测试则是要检查已实现的软件是否满足了需求规格说明中确定了的各种需求**，以及软件配置是 否完全、正确
+
+## 测试结束的标准
+
+1、用例全部通过。2、覆盖率达到标准。3、缺陷率达到标准。4、其他指标达到标准
+
+
+
+
+
+## Bug的缺陷的优先级和严重程度
+
+
+
+### 缺陷的严重性
+
+ **1 – 非常严重的缺陷**
+
+软件的意外退出甚至操作系统崩溃，造成数据丢失。 
+
+**2 – 较严重的缺陷**
+
+例如，软件的某个菜单不起作用或者产生错误的结果； 
+
+**3 - 软件一般缺陷**
+
+例如，本地化软件的某些字符没有[翻译](http://www.haosou.com/s?q=翻译&ie=utf-8&src=wenda_link)或者翻译不准确； 
+
+**4 - 软件界面的细微缺陷**
+
+例如，某个控件没有对齐，某个[标点符号](http://www.haosou.com/s?q=标点符号&ie=utf-8&src=wenda_link)丢失等。
+
+### 缺陷的优先性
+
+**1 –最高优先级**
+
+例如，软件的主要功能错误或者造成软件崩溃，数据丢失的缺陷。 
+
+**2 – 较高优先级**
+
+例如，影响软件功能和性能的一般缺陷； 
+
+**3 -一般优先级**
+
+例如，本地化软件的某些字符没有翻译或者翻译不准确的缺陷； 
+
+**4 – 低优先级**
+
+例如，对[软件的质量](http://www.haosou.com/s?q=软件的质量&ie=utf-8&src=wenda_link)影响非常轻微或出现几率很低的缺陷。
+
+## 测试模型
+
+### 瀑布模型
+
+仅仅把测试过程作为编码之后的一个阶段，忽视了测试对需求分析,系统设计的验证，如果前面 设计错误，得一直到后期的验收测试才被发现，耗时耗力
+
+### v模型
+
+测试与开发同时进行，在 V 模型的基础上，增加了在开发阶段的同步测试。
+
+需求分析阶段-设计系统测试策略（策略包括确定测试技术和工具、测试完成标准等）
+
+概要设计-设计集成测试策略
+
+详细设计-设计单元测试策略
+
+编码-单元测试
+
+集成-集成测试
+
+实施-系统测试
+
+交付-验收测试
+
+### w模型
+
+测试对象不仅仅是程序，还包括需求和设计
+
+
+
+需求分析-需求测试
+
+概要设计-概要设计测试
+
+详细设计-详细设计测试
+
+编码-单元测试
+
+模块集成-集成测试
+
+系统构建与实施-系统测试
+
+交付运行-验收测试
+
+## 测试分类
+
+<img src="D:\Repositories\notes\images\image-20220913093321763.png" alt="image-20220913093321763" style="zoom: 67%;" />
+
+
+
+## 什么是好的测试框架
+
+gtest的好处:
+
+- 测试应该是**独立的**和**可重复的**。gtest通过是每个测试运行在不同的对象中从而使测试隔离
+- 测试应该有**良好的组织**以反映被测试代码的结构。gtest将相关的测试划分到一个测试组内，并且测试组内的测试能共享数据和子例程。
+- 测试应该是**可移植**和**可复用**。
+- 测试应该在测试失败时尽可能地提供关于问题的信息。gtest在第一次测试失败时不会停止。相反，它只能停止当前测试，并继续下一个测试。您还可以设置报告非致命故障的测试，然后进行当前测试。因此，您可以在单个编辑过程中检测和修复多个错误。
+- 测试框架应该让测试人员不再需要编写那些琐碎的代码。gtest会自动跟踪所有定义的测试，并且不需要用户枚举它们以运行它们。
+- 测试要求快速。使用gtest，可以在测试中重复使用共享资源，而不是让测试相互依赖。
+
+# [GoogleTest](https://google.github.io/googletest/)
+
+
+
+## Test Case
+
+### [Assertions Reference](https://google.github.io/googletest/reference/assertions.html)
+
+`ASSERT_*`断言失败时将立刻从当前结束，可能会跳过清理代码从而造成内存泄漏
+
+`EXPECT_*`断言允许多个错误
+
+
+
+所有的断言宏都支持使用`<<`符号自定义错误报告
+
+```c++
+EXPECT_TRUE(my_condition) << "My condition is not true";
+```
+
+#### 泛化断言
+
+> 验证`value`是否匹配[matcher](https://google.github.io/googletest/reference/matchers.html)
+
+```c++
+EXPECT_THAT(value, matcher)
+ASSERT_THAT(value, matcher)
+```
+
+**使用样例**
+
+```c++
+#include "gmock/gmock.h"
+
+using ::testing::AllOf;
+using ::testing::Gt;
+using ::testing::Lt;
+using ::testing::MatchesRegex;
+using ::testing::StartsWith;
+
+...
+EXPECT_THAT(value1, StartsWith("Hello"));
+EXPECT_THAT(value2, MatchesRegex("Line \\d+"));
+ASSERT_THAT(value3, AllOf(Gt(5), Lt(10)));
+```
+
+### 布尔条件
+
+#### EXPECT_TRUE
+
+#### EXPECT_FALSE
+
+### 二元对比
+
+#### EXPECT_EQ
+
+#### EXPECT_NE
+
+#### EXPECT_LT
+
+> 验证小于
+
+#### EXPECT_GE
+
+> 验证大于
+
+### 字符串对比
+
+#### EXPECT_STREQ
+
+#### EXPECT_STRNE
+
+#### EXPECT_STRCASEEQ
+
+> 验证两个字符串是否具有相同的内容，忽略大小写
+
+#### EXPECT_STRCASENE
+
+### 浮点数对比
+
+#### EXPECT_FLOAT_EQ
+
+#### EXPECT_DOUBLE_EQ
+
+#### EXPECT_NEAR
+
+> 验证两个浮点数不超过误差值
+
+```c++
+EXPECT_NEAR(val1, val2, abs_error)
+ASSERT_NEAR(val1, val2, abs_error)
+```
+
+
+
+### 异常断言
+
+#### EXPECT_THROW
+
+> 验证语句抛出了指定类型的异常
+
+```c++
+EXPECT_THROW(statement, expection_type)
+ASSERT_THROW(statement, expection_type)
+```
+
+#### EXPECT_ANT_THROW
+
+> 验证语句抛出了任意类型的异常
+
+```c++
+EXPECT_ANY_THROW(statement)
+ASSERT_ANY_THROW(statement)
+```
+
+#### EXPECT_NO_THROW
+
+### 谓词断言
+
+#### EXPECT_PRED*
+
+> 验证谓词为真
+
+```c++
+EXPECT_PRED1(pred,val1)
+EXPECT_PRED2(pred,val1,val2)
+EXPECT_PRED3(pred,val1,val2,val3)
+EXPECT_PRED4(pred,val1,val2,val3,val4)
+EXPECT_PRED5(pred,val1,val2,val3,val4,val5)
+
+ASSERT_PRED1(pred,val1)
+ASSERT_PRED2(pred,val1,val2)
+ASSERT_PRED3(pred,val1,val2,val3)
+ASSERT_PRED4(pred,val1,val2,val3,val4)
+ASSERT_PRED5(pred,val1,val2,val3,val4,val5)
+```
+
+`pred`是一个**函数**或者是**仿函数**且返回值是`bool`类型
+
+**使用样例**
+
+```c++
+// Returns true if m and n have no common divisors except 1.
+bool MutuallyPrime(int m, int n) { ... }
+...
+const int a = 3;
+const int b = 4;
+const int c = 10;
+...
+EXPECT_PRED2(MutuallyPrime, a, b);  // Succeeds
+EXPECT_PRED2(MutuallyPrime, b, c);  // Fails
+```
+
+#### EXPRE_PRED_FORMAT*
+
+```c++
+EXPECT_PRED_FORMAT1(pred_formatter,val1)
+EXPECT_PRED_FORMAT2(pred_formatter,val1,val2)
+EXPECT_PRED_FORMAT3(pred_formatter,val1,val2,val3)
+EXPECT_PRED_FORMAT4(pred_formatter,val1,val2,val3,val4)
+EXPECT_PRED_FORMAT5(pred_formatter,val1,val2,val3,val4,val5)
+
+ASSERT_PRED_FORMAT1(pred_formatter,val1)
+ASSERT_PRED_FORMAT2(pred_formatter,val1,val2)
+ASSERT_PRED_FORMAT3(pred_formatter,val1,val2,val3)
+ASSERT_PRED_FORMAT4(pred_formatter,val1,val2,val3,val4)
+ASSERT_PRED_FORMAT5(pred_formatter,val1,val2,val3,val4,val5)
+```
+
+略
+
+### 死亡断言
+
+> **死亡测试**(Death Test),即程序因为各种原因挂掉的测试,只测试挂掉这一种现象,并且捕捉挂掉原因.
+
+
+
+生成新进程,在新进程中进行死亡测试(进程间不共享资源,保证安全性).
+
+生成进程取决于平台，通过编译选项`--gtest_death_test_style`，指定到`::testing::GTEST_FLAG(death_test_style)`。具体生成进程命令如下:
+
+- POSIX 系统，使用`fork()`
+  - `--gtest_death_test_style`值为`fast`,立即执行执行死亡测试的语句.此方式为默认.
+  - `--gtest_death_test_style`值为`threadsafe`,安装测试代码设定的那样运行,目的是在线程安全性与测试执行效率间取得平衡.
+- Windows系统 `CreateProcess()`API,只有`threadsafe`模式.
+
+引入`GTEST_FLAG_SET`的原因是考虑线程安全. 有可能fork出来的线程(threads started by statically-initialized modules)无法被释放. Google Test 采用了三种策略应对这个问题.
+
+- 当死亡测试遇到多线程环境就会WARNING.
+- `DeathTest`结尾的test suite会在其他test之前进行.
+- 在Linux上使用`clone`取代`fork`.
+
+在死亡测试的 statement 里进行多线程是没问题的,因为死亡测试是在新进程里的.
+
+`GTEST_FLAG_SET`的设置方式非常灵活,可以设置全局的也可以随用随设置
+
+#### EXPECT_DEATH
+
+> 验证`statement`语句造成进程以非0异常终止并输出`stderr`和`matcher`匹配内容
+
+```c++
+EXPECT_DEATH(statement,matcher)
+ASSERT_DEATH(statement,matcher)
+```
+
+`matcher`要么是[matcher](https://google.github.io/googletest/reference/matchers.html)要么是正则表达式
+
+**使用样例**
+
+```c++
+EXPECT_DEATH(DoSomething(42), "My error");
+```
+
+#### EXPECT_DEATH_IF_SUPPORTED
+
+> 如何支持死亡测试，则行为与`EXPECT_DEATH`一样，否则就什么都不做
+
+#### EXPECT_DEBUG_DEATH
+
+> 在debug模式的时候验证。否则就只是执行语句
+
+#### EXPECT_EXIT
+
+> 验证进程退出的状态满足谓词
+
+```c++
+EXPECT_EXIT(statement,predicate,matcher)
+ASSERT_EXIT(statement,predicate,matcher)
+```
+
+**使用样例**
+
+```c++
+// Returns true if the program exited normally with the given exit status code.
+::testing::ExitedWithCode(exit_code);
+
+// Returns true if the program was killed by the given signal.
+// Not available on Windows.
+::testing::KilledBySignal(signal_number);
+EXPECT_EXIT(NormalExit(), testing::ExitedWithCode(0), "Success");
+```
+
+
+
+### **测试数据参数化**
+
+**1.添加类继承自**`public::testing::TestWithParam<T>`
+
+**使用样例**
+
+```c++
+class isPrimerParamTest: public::testing::TestWithParam<int>{
+    
+}.
+```
+
+2.告诉gtest你的测试参数
+
+```c++
+INSTANTIATE_TEST_CASE_P(TrueReturn, isPrimerParamTset,
+                       testing::Values(3, 5, 7, 9, 100));
+```
+
+第三个参数还可以是
+
+- Range(begin, end, step)
+- ValuesIn(容器或c数组),如ValuesIn(v.begin(), v.end())
+- Bool()分别取true和false
+- Combin(g1, g2,...,gn) 排列组合
+
+3.获取参数并测试
+
+```c++
+TEST_P(isPrimerParamTest, ExpectTrueReturn){
+    int x = GetParam();
+    EXPECT_TRUE(isPrime(x));
+}
+```
+
+
+
+## Test Suit
+
+
+
+## 事件机制
+
+### test case事件
+
+> 每次案例前后，多次对类初始使用测试
+
+也就是TestFixtures的内容
+
+
+
+### test suit 事件
+
+> 在某一批测试用例中，第一个执行到最后一个执行后都只是对类初始化一次，最后一次销毁
+>
+> 一般用于类行为测试或者其他有联系的多个方法测试
+
+**使用样例**
+
+```c++
+class SuitTestSmpl: public testing::Test{
+protected:
+    static void SetUpTestCase(){
+  		share = new T;
+        ...
+    }
+    static void TearDownTestCase(){
+        ...
+         delete _share;
+    }
+    static T *share;
+}
+```
+
+```c++
+// t1和t2共享share
+TEST_F(SuitTestSmpl, t1){
+    ...
+}
+TEST_F(SuitTestSmpl, t2){
+	..    
+}
+
+```
+
+
+
+### Global 事件
+
+> 所有用例共享
+>
+> 可用于组合类行为测试
+
+```c++
+class GlobalTestSmpl: public testing::Environment {
+protected:
+    virtual void SetUp(){
+        // 准备工作
+    }
+    virtual void TearDown(){
+        // 清理工作
+    }
+};
+
+int _tmain(int argc, char* argv[]){
+    // 注册全局事件GlobalTestSmpl
+    testing::addGlobalTestEnviroment(new GlobalTestSmpl);
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}
+```
+
+
+
+
+
+### Test Fixtures
+
+如果编写了两个或多个在类似数据上运行的测试，则可以使用test fixture。可以重用对象的相同配置进行多个不同的测试。
+
+**创建一个fixture：**
+
+- 创建一个类继承自`::testing::Test`，body部分使用`protected`，gtest将从子类访问成员
+- 定义默认构造函数或`SetUp()`函数
+- 定义析构函数或`TearDown()`函数
+
+**使用fixture**
+
+```c++
+TEST_F(Test Fixtures类名, TestName) {
+  ... test body ...
+}
+```
+
+当测试运行时，gtest将创建一个TestFixtureName对象t1，用SetUp函数初始化t1，测试，用TearDown函数并销毁t1
+
+**main()函数**
+
+大多数情况下不需要自己写`main`函数，它们会链接到`gtest_main`。如果要写自己的main函数必须要返回`RUN_ALL_TESTS()`的值
+
+```c++
+int main(int argc, char **argv) {
+  // The ::testing::InitGoogleTest() function parses the command line for googletest flags, 
+  // and removes all recognized flags.
+  ::testing::InitGoogleTest(&argc, argv); 
+  return RUN_ALL_TESTS();
+}
+```
 
 
 

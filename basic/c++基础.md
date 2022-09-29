@@ -17,7 +17,9 @@
 
 > const只有用在成员函数时可以算作函数签名的一部分
 
-**volatile对象**——类型为 `volatile-`限定的对象，通过 `volatile`限定的类型的泛左值表达式的每次访问（读或写操作、成员函数调用等），都被当作对于优化而言是可见的副作用（即在单个执行线程内，volatile 访问不能被优化掉，或者与另一[按顺序早于](https://zh.cppreference.com/w/cpp/language/eval_order)或按顺序晚于该 volatile 访问的可见副作用进行重排序）
+**volatile对象**——类型为 `volatile-`限定的对象，编译器对访问volatile限定的代码就不再进行优化。当要求使用 volatile 声明的变量的值的时候，**系统总是重新从它所在的内存读取数据**，即使它前面的指令刚刚从该处读取过数据。
+
+**volatile定义变量的值是易变的，每次用到这个变量的值的时候都要去重新读取这个变量的值，而不是读寄存器内的备份。多线程中被几个任务共享的变量需要定义为volatile类型。**
 
 #### **限定成员函数**
 
@@ -38,6 +40,10 @@ const double &cdr {1}; // 正确
 double tmp = double{1}; // 首先创建一个右值的临时变量
 const double &cdr{tmp}; // 然后用临时变量初始化cdr
 ```
+
+### mutable
+
+在C++中，mutable也是为了突破const的限制而设置的。被mutable修饰的变量，将永远处于可变的状态，即使在一个const函数中。
 
 ### extern
 
@@ -133,11 +139,13 @@ p->f(); // 隐式实例化 Z<char> 且 Z<char>::f() 在此出现。
 静态成员函数不关联到任何对象。调用时，它们没有 this 指针。
 静态成员函数的地址可以存储在常规的函数指针中，但不能存储在成员函数指针中。
 
-## 静态多态与动态多态
+## 1.2 静态多态与动态多态
+
+> **多态**：简单点说:“一个接口，多种实现”，就是同一种事物表现出的不同的行为。
 
 静态多态（函数重载和运算符重载 +类），是在编译的时候，就确定调用函数的类型；动态多态（虚函数实现），在运行的时候，才能确定调用的是哪个函数，动态绑定。运行基类指针指向派生类的对象，并调用派生类的函数。
 
-## 函数类型与函数声明
+## 1.3 函数类型与函数声明
 
 ```c++
 void say_hello(const char *str); // 函数
@@ -147,7 +155,7 @@ void (*fptr)(const char *); // 函数类型
 
 
 
-## C语言
+## 1.4 C语言
 
 ### 实现一个`memcpy`函数
 
@@ -155,7 +163,7 @@ void (*fptr)(const char *); // 函数类型
 
 ```c
 void* memcpy(void* dest, void* src, size_t len) {
-    if (dest ==     NULL || src == NULL) {
+    if (dest == NULL || src == NULL) {
         return NULL;
     }
 
@@ -182,7 +190,7 @@ void* memcpy(void* dest, void* src, size_t len) {
 
 
 
-## 异常处理与异常安全
+## 1.5 异常处理与异常安全
 
 > 用异常和断言是避免程序错误
 
@@ -190,7 +198,7 @@ void* memcpy(void* dest, void* src, size_t len) {
 
 > Eiffel观点: 契约破坏才会有Exception 
 
-<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220719211549822.png" alt="image-20220719211549822" style="zoom:50%;" />
+<img src=".\images\image-20220719211549822.png" alt="image-20220719211549822" style="zoom:50%;" />
 
 
 
@@ -214,6 +222,46 @@ void* memcpy(void* dest, void* src, size_t len) {
 - 强异常保证: 如果函数抛出异常，那么程序的状态会恰好被回滚到该函数调用前的状态
 - 基础异常保证
 - 无异常保证
+
+## 1.6 float类型
+
+IEEE 754
+
+<img src="..\images\image-20220830105234058.png" alt="image-20220830105234058" style="zoom:50%;" />
+
+![image-20220830105131837](..\images\image-20220830105131837.png)
+
+其中尾数是整数部分，阶码就是指数部分
+
+### 有效位数
+
+> 有效位应该看的是看整数部分能够保存几位，超过了这几位会丢失精度，它和指数部分无关，指数部分是和最大值和最小值有关
+
+float类型的有效位是6位——$2^{24}=16777216$
+
+double类型的有效位是16位
+
+
+
+### 阶码
+
+阶码是**移码**，偏置值是127，也就是说`-128~127`整体向右移动127变成`-1~254`，因此-128是全1，-127全0。**全1和全0做特殊用处，阶码范围-126~127**
+
+**当阶码全为0，尾数不全为0：**表示**非规格化**小数
+
+**当阶码全为0，尾数全为0**：表示0
+
+**当阶码全为1，尾数全为0**：表示正负无穷
+
+**当阶码全为1，尾数不全为0**：表示NaN，非法运算，比如0/0操作
+
+### 最大绝对值和最小绝对值
+
+**最小绝对值**:尾数全为0(1.000000...，隐含最高位),阶码真值最小-126
+
+最大绝对值：尾数全1（1.111111...），阶码真值最大127
+
+
 
 # 2. 内存管理
 
@@ -288,9 +336,9 @@ pc->~Complex(); //
 operator delete(pc) // 
 ```
 
-### arry new/delete表达式
+### array new/delete表达式
 
-> `arry new`只能使用默认的构造函数
+> array new`只能使用**默认**的构造函数
 
 ```c++
 MyClass *ptr = new MyClass[3]; // 调用3次ctor，只能使用默认的构造函数
@@ -300,7 +348,7 @@ delete[] ptr; // 调用3次dtor
 
 **`malloc`分配内存**的时候带有**`cookie信息(cookie大小8字节)`**包括记录了分配几个对象等，`free`函数根据cookie信息去回收内存
 
-<img src="D:\mygit\notes\images\20220629164152.png" style="zoom:33%;" />
+<img src="..\images\20220629164152.png" style="zoom:50%;" />
 
 #### 内存泄漏的情况
 
@@ -314,7 +362,7 @@ delete ptr; // 调用1次dtor，内存泄漏
 
 ### `placement new`
 
-placement new 允许我们将object构建于allocated memory中
+>  placement new 允许我们将object构建于allocated memory中
 
 ```c++
 #include <new>
@@ -342,7 +390,7 @@ void* operator new(size_t, void* loc) {
 
 ### 重载基本构建
 
-#### 重载全局::operator new/delele`, `::operator new[]/delete[]`
+#### 重载全局::operator new/delete`, `::operator new[]/delete[]`
 
 **注意**：这个影响很大
 
@@ -415,6 +463,8 @@ class Foo {
 **我们也可以重写`placement delete`，但是只有构造对象的时候抛出异常，才会调用相应的`delete`动作**。主要是为了避免内存分配好后，构造对象失败后可以回收已经分配的内存。
 
 ## 2.2. 内存池设计
+
+> new在内存分配上面有一些局限性，new的机制是将内存分配和对象构造组合在一起，同样的，delete也是将对象析构和内存释放组合在一起的。allocator将这两部分分开进行，**allocator申请一部分内存，不进行初始化对象，只有当需要的时候才进行初始化操作**
 
 每次申请一次内存，都需要调用一次malloc并且malloc的内存块带有**cookie信息**。如果**一次性申请一大块内存**，可以**降低调用malloc的次数**的同时，也会**减少cookie信息**的消耗。即内存池设计的目的：**提高速度和节约内存**
 
@@ -624,27 +674,36 @@ free List是一个16个大小的数组，记录从$8\sim16\times8$个字节freeL
 
 ## 内存分配方式
 
-在C++中，内存分成5个区，他们分别是堆、栈、自由存储区、全局/静态存储区和常量存储区。
+在C++中，内存分成5个区，他们分别是堆、栈、自由存储区、全局/静态存储区和常量存储区， 程序代码区：
 
-**栈**： 函数内局部变量的存储单元都可以在栈上创建，函数执行结束时这些存储单元自动被释放。
-**堆**：`new`申请的空间
-**自由存储区**
-**全局/静态存储区**：全局变量和静态变量
-**常量存储区**：特殊存储区，不允许被修改
+从高地址到低地址：
+
+- **栈区**： 函数内局部变量的存储单元都可以在栈上创建，函数执行结束时这些存储单元自动被释放。
+- **堆区**：`new`申请的空间
+- **全局/静态区**：全局变量和静态变量。`C++标准定为全局或静态`**对象**`是有首次用到时才会进行构造`,基本类型与C语言的一样
+- **常量区**：特殊存储区，不允许被修改
+- **程序代码区**
 
 ## 程序内存模型
 
 从**低地址到高地址**，一个程序由**代码段**、**数据段**、**BSS段**、**堆**、**共享区**、**栈**等组成。
 
 - 代码段：存放程序的机器指令
-- 数据段：存放**已被初始化的**全局变量和静态变量
-- BSS段：存放**未被初始化的**全局变量和静态变量
-- **堆**
-- 共享库：位于堆和栈中间
-- **栈**
-  
+- 数据段：存放**已被初始化的**全局变量和静态变量。`编译器分配内存，并初始化`
+- BSS段：存放**未被初始化的**全局变量和静态变量。`编译器分配内存，操作系统初始化0值`
+- **堆段**
+- 文件映射段：位于堆和栈中间
+- **栈段**
 
-**常量存储区** ：存放常量，不允许修改。
+## 如何检测或避免内存泄漏
+
+### 内存池
+
+
+
+
+
+
 
 # 3. 面向对象设计
 
@@ -736,15 +795,15 @@ complex<int> c2(2, 1);
 
 ### 构造函数
 
-**1. inline函数**
+#### **1. inline函数**
 
 成员函数默认都是**inline函数**，也可以自己用**inline**关键字定义
 
-**2. 访问级别**
+#### **2. 访问级别**
 
 数据：private
 
-**3. 构造函数**
+#### **3. 构造函数**
 
 ```c++
 class complex {
@@ -775,7 +834,30 @@ complex *p = new complex(4);
 - 初始化：初值列直接初始化。
 - 赋值
 
-**4. 函数重载**
+##### 初始化与赋值的区别
+
+1.简单基本数据类型的初始化和赋值区别不大
+
+2.类和复杂类型的初始化调用的**构造函数或拷贝构造**，而赋值调用的是**拷贝赋值**函数
+
+`初值列是初始化阶段，而构造函数大括号内的是赋值阶段。在初值列设置成员变量，可以避免再次调用拷贝赋值函数。在构造函数内部赋值，则初始化阶段会调用成员变量的默认构造函数`
+
+`初值列`可以解决**`cons`t变量**和**引用变量**初始化的问题，这些变量在初始化以后就不能在对其赋值。
+
+```c++
+class Foo{
+    const int a;
+    int &b;
+    Foo(int _b): a(1), b(_b)
+    {}
+}
+```
+
+
+
+
+
+#### **4. 函数重载**
 
 ```c++
 class complex{
@@ -802,7 +884,7 @@ complex(double r= 0, double i = 0):re(r), im(i){}
 complex():re(r), im(i){}
 ```
 
-**5. 作用域符号**
+#### **5. 作用域符号**
 
 - class::member
 - 全局作用域::
@@ -998,6 +1080,15 @@ inline String::~String(){
 ```
 
 ### 拷贝构造与拷贝复制
+
+```c++
+A(const A&);// 拷贝构造函数
+A& operator=(const A&) //拷贝赋值
+```
+
+
+
+
 
 **带有指针的类一定要写拷贝构造与拷贝赋值**！
 
@@ -1624,6 +1715,8 @@ sizeof (a) == sizeof (&alias_a)
 
 ### 对象模型：vptr和vtbl
 
+> **vtable是在编译器生成的，编译器为每个类生成一个vtable，在运行时，生成的对象的vptr将指向这个vtable**
+
 **虚函数是面向对象最重要的部分**
 
 ![](./imagse/../../images/vptr.png)
@@ -1670,7 +1763,11 @@ int main(){
 }
 ```
 
+**总结：**
 
+- 虚表创建的时机：编译期间编译器就为每个类确定好了对应的虚函数表里的内容。
+- 虚指针创建的时机：vptr跟着对象走，所以对象什么时候创建出来，vptr就什么时候创建出来，也就是运行的时候。
+  当程序在编译期间，编译器会为构造函数中增加为vptr赋值的代码(这是编译器的行为)，当程序在运行时，遇到创建对象的代码，执行对象的构造函数，那么这个构造函数里有为这个对象的vptr赋值的语句。
 
 ### 对象模型：this.概念
 
@@ -1707,6 +1804,18 @@ int main(){
 ```
 
 **虚函数的实现与抽象函数实现基本类似，派生类调用非虚函数时实际上调用的是父类的非虚函数， 而派生类实现了父类的虚函数时，调用的则是自己的虚函数——动态绑定实现**
+
+
+
+### 总结概述
+
+**函数签名**：编译器对函数做函数签名以实现重载的效果。
+
+**成员函数转换成非成员函数：**改写函数原型以插入一个额外的参数`this`指针到成员函数中。
+
+**虚函数调用：**`(*ptr)->vtpr[offset](ptr)`
+
+在编译期，编译器为类中的**虚函数**，生成一个**虚函数表**，虚函数按照顺序将地
 
 ## 4.7. 重载、重写与隐藏
 
@@ -1784,6 +1893,10 @@ int main()
 ### 07. 为多态基类声明`virtual`析构函数
 
 ### 08. 析构函数绝对不要吐出异常
+
+- 如果析构函数抛出异常，则异常点之后的程序不会执行，如果析构函数在异常点之后执行了某些必要的动作比如释放某些资源，则这些动作不会执行，会**造成诸如资源泄漏**的问题。
+
+- 通常异常发生时，c++的机制会调用已经构造对象的析构函数来释放资源，此时若析构函数本身也抛出异常，则前一个异常尚未处理，又有新的异常，**会造成程序崩溃**的问题。
 
 ### 09. 绝不在构造和析构期间调用`virtual`函数
 
@@ -1941,13 +2054,13 @@ G4.9的版本分配器默认使用的是 `alloctor`，G2.9较好的设计 `alloc
   - map/mutimap
 - unordered（无序关联） 容器
 
-#### list
+### list
 
 > 最有代表性
 
 双向循环链表，**刻意在尾端加一个空白结点，用以符合STL“前闭后开”区间**
 
-**GNU2。9**
+**GNU2.9**
 
 ![](../images/20211125_111224.png)
 
@@ -2000,7 +2113,7 @@ protected:
 };
 ```
 
-#### vector
+### vector
 
 按照GNU2.9设计实现vector
 
@@ -2093,17 +2206,27 @@ void vector<T>::insert_aux(iterator position, const T& x) {
 
 ![](../images/20211125_135732.png)
 
-#### array
+
+
+#### `reserve`和`resize`的区别
+
+`resize`方法是改变容器大小并创建对象
+
+`reserve`方式预留空间，不会创建对象
+
+#### `vector.swap`
+
+### array
 
 **TR1**技术报告1
 
 > 没有构造函数与析构函数
 
-#### forward_list
+### forward_list
 
 ![](../images/20211202_192841.png)
 
-#### deque
+### deque
 
 **逻辑**上是一个双端可入的数组
 
@@ -2222,9 +2345,99 @@ reference  operator*() const{return *cur;}
 
 **当map满了以后，会将其复制到新空间的中间，以让其前插入**
 
-#### 红黑树
+### 红黑树
 
 红黑树是一种平衡二插树
+
+#### 特性
+
+1. 每个节点的颜色要么是红色的，要么是黑色的
+
+2. 根节点的颜色是黑色的
+
+3. 如果一个节点是红色的，两个子节点就是黑色的
+
+4. 每个叶子节点都是黑色的
+5. **从一个节点到该节点的子孙节点的所有路径上包含相同数目的黑节点。**
+
+**特性（5）保证了没有一条路径比其他路径长出两倍。因此，红黑树是相对平衡的二叉树**
+
+
+
+#### 红黑树的时间复杂度证明
+
+定理：**一棵含有n个节点的红黑树的高度至多为`2log(n+1)`**.
+
+证明：略
+
+
+
+#### 优点
+
+1. **红黑树不追求绝对平衡**，红黑树插入最多两次，删除最多三次。因此，**适用于频繁插入删除的场景**
+
+#### 缺点
+
+1. **对于查询要求比较高的场景**，平衡二叉树还是比较优于红黑树
+
+#### 左旋与右旋
+
+**左旋：**假设父节点是X，右子树节点是Y
+
+从X节点看，如果Y是红色节点保持性质，否则违反性质5.
+
+从Y节点看，如果X是红色节点保持性质，否则违反性质5.
+
+#### 插入
+
+> 插入节点的**颜色是红色**，分成插入和修复两个过程
+
+ 修复的四种情况：
+
+- Z是根节点
+- Z的叔节点是红色的
+- Z的叔节点是黑色的，并且局部呈现直线
+- Z的叔节点是黑色的，并且局部呈现三角形
+
+##### 1.第一种情况
+
+把Z的颜色变成红色即可	
+
+##### 2.第二种情况
+
+<img src="D:\Repositories\notes\images\image-20220830113623831.png" alt="image-20220830113623831" style="zoom:67%;" />
+
+对Z的父节点，以及叔节点变色即可
+
+<img src="D:\Repositories\notes\images\image-20220830113732690.png" alt="image-20220830113732690" style="zoom:67%;" />
+
+##### 3.第三种情况
+
+<img src="D:\Repositories\notes\images\image-20220830113824775.png" alt="image-20220830113824775" style="zoom:67%;" />
+
+先旋转Z的祖父节点，旋转的方向跟直线的方向一致
+
+然后原来的父亲和祖父变色
+
+<img src="D:\Repositories\notes\images\image-20220830113944309.png" alt="image-20220830113944309" style="zoom:67%;" />
+
+##### 第四种情况
+
+<img src="D:\Repositories\notes\images\image-20220830114039634.png" alt="image-20220830114039634" style="zoom:67%;" />
+
+先旋转父节点，旋转方向跟三角形角的方向一致
+
+然后跟第三种情况一致
+
+#### 删除
+
+有两种情况：
+
+- 没有子节点
+- 一个子节点
+- 两个子节点
+
+#### 标准库的红黑树
 
 提供“遍历”操作及iterators，按正常的遍历，得到排序状态。
 
@@ -2266,7 +2479,7 @@ struct identity:public unary_function<T,T>{
 }
 ```
 
-#### set与multiset
+### set与multiset
 
 set/multiset以rb_tree为底层结构，因此有元素自动排序特性。
 
@@ -2289,7 +2502,7 @@ private:
 };
 ```
 
-#### map与multimap
+### map与multimap
 
 map/multimap以rb_tree为底层结构，因此有元素自动排序特性
 
@@ -2317,13 +2530,139 @@ public:
 };
 ```
 
+
+
+### unordered_*
+
 #### hashtable
+
+<img src="D:\Repositories\notes\images\202205220035271.png" alt="img" style="zoom: 80%;" />
 
 **实现方式**：“拉链法”
 
-当插入的元素数量超过 `buckets vector`的大小，增加容量，需要**rehashing**
+hashtable中的bucket所维护的是linked-list，而bucket本身使用vector进行存储。
 
-#### unordered_*
+在hashtable设计bucket的数量上，其内置了28个质数[53, 97, 193,...,429496729]，在创建hashtable时，会根据存入的元素个数选择大于等于元素个数的质数作为hashtable的容量
+
+当插入的元素数量超过装载因子时，就需要扩容，然后**rehashing**
+
+
+
+#### hash原理
+
+**基本原理就是把任意长度的输入，通过hash算法映射到hash空间（bucket）**
+
+据抽屉原理，一定会存在不同的输入被映射成相同输出的情况。那么作为一个好的hash算法，就需要这种冲突的概率尽可能小。
+
+#### 解决冲突
+
+##### 1.hash函数
+
+ 一个好的hash函数的值应该尽可能的平均分布
+
+##### 2.处理冲突的方法
+
+开放地址法
+
+拉链法
+
+平方取中法
+
+##### 3.负载因子大小
+
+负载因子 = bucket中元素的比例
+
+负载因子越大，冲突的概率也就越大
+
+
+
+#### c++中的hash函数
+
+**模板特化**
+
+```c++
+template<typename key>
+struct hash;
+
+template<> struct hash<bool>;
+template<> struct hash<char>;
+template<> struct hash<signed char>;
+template<> struct hash<unsigned char>;
+template<> struct hash<char8_t>;        // C++20
+template<> struct hash<char16_t>;
+template<> struct hash<char32_t>;
+template<> struct hash<wchar_t>;
+template<> struct hash<short>;
+template<> struct hash<unsigned short>;
+template<> struct hash<int>;
+template<> struct hash<unsigned int>;
+template<> struct hash<long>;
+template<> struct hash<long long>;
+template<> struct hash<unsigned long>;
+template<> struct hash<unsigned long long>;
+template<> struct hash<float>;
+template<> struct hash<double>;
+template<> struct hash<long double>;
+template<> struct hash<std::nullptr_t>;
+template< class T > struct hash<T*>;
+```
+
+**可变模板参数**
+
+自定义hash函数
+
+```c++
+class CustomerHash{
+public:
+    std::size_t operator(const Customer& c) const {
+    	return hash_val(c.fname, c.lname, c.no);
+    }
+};
+```
+
+##### hash_val函数的实现基于可变模板参数
+
+1.递归入口
+
+```c++
+template<typename... Types>
+inline size_t hash_val(const Types&... args){
+    size_t seed = 0;
+    hash_val(seed, args...);
+    return seed;
+}
+```
+
+2.递归主体
+
+```c++
+template<typename T, typename... Types>
+inline void hash_val(size_t& seed, const T& val, const Types&... args){
+    hash_combine(seed, val);
+    hash_val(seed, args...);
+}
+```
+
+3.递归出口
+
+```c++
+template<typename T>
+inline void hash_val(size_t& seed, const T& val){
+    hash_combine(seed, val);
+}
+```
+
+4.hash_combine
+
+```c++
+#include <functional>
+template<typename T> 
+void hash_combine(size_t& seed, const T& val) {
+    seed ^= std::hash<T>()(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2); 
+}
+```
+
+
 
 ## 5. 迭代器与算法
 
@@ -2406,6 +2745,18 @@ void algorithm(...){
 ### 迭代器分类
 
 <img src="../images/1640054969566.png" alt="1640054969566.png" style="zoom:50%;" />
+
+
+
+| 容器          | 迭代器类型                 |
+| ------------- | -------------------------- |
+| vector        | random_access_iterator_tag |
+| list          | bidirectional_iterator_tag |
+| deque         | random_access_iterator_tag |
+| map           | bidirectional_iterator_tag |
+| unordered_map | forward_iterator_tag       |
+
+
 
 ```c++
 //五种迭代器类别
@@ -2589,6 +2940,50 @@ InputIterator find(InputIterator first,
         return first;
 }
 ```
+
+### `std::sort`源码
+
+#### 背景
+
+快速排序虽然平均复杂度为$O(NlogN)$，却可能由于不当的pivot选择，导致其在最坏情况下复杂度恶化为$O(N^2)$。
+
+而堆排序最坏的情况下仍然是$O(Nlog N)$，但是它的平均速度比快排要慢2~5倍，这是因为快排是递归会访问局部数据，符合程序的局部性原理，而堆排的建堆过程要访问所有的数据，并且向上调整或向下调整算法不符合程序的局部性原理。
+
+
+
+插入排序在数据基本有序的时候，速度是很快的。
+
+
+
+#### 内省式的排序（Introspective Sorting）
+
+集成了前面提到的三种算法各自的优点：
+
+- 在数据量很大时采用正常的快速排序，此时效率为O(logN)。
+- 一旦分段后的数据量小于某个阈值，就改用插入排序，因为此时这个分段是基本有序的，这时效率可达O(N)。
+- 在递归过程中，如果递归层次过深，分割行为有恶化倾向时，它能够自动侦测出来，使用堆排序来处理，在此情况下，使其效率维持在堆排序的O(N logN)，但这又比一开始使用堆排序好。
+
+### 迭代器失效
+
+**顺序容器**：如`vector`、`deque`，删除当前元素会使得后面的迭代器失效
+
+```c++
+it = v.erase(it) // erase方法可以返回下一个有效的 iterator
+```
+
+**链式容器：**如`list`，删除当前元素对其他迭代器没有影响
+
+```c++
+v.erase(it ++)
+```
+
+**关联式容器：**如`map`、`set`，删除当前元素对其他迭代器没有影响
+
+```c++
+v.erase(it ++)
+```
+
+
 
 ## 6. 仿函数
 
@@ -2970,7 +3365,7 @@ int main(){
 
 >  用于含有**`虚函数`**的类之间向上、向下和侧向之间的转
 
-在不知道指针的动态类型时使用
+**在不知道指针的动态类型时使用**
 
 ```c++
 struct A{
@@ -3180,7 +3575,7 @@ vector<int> v{2, 3, 5, 5};
 vector<string> cities{"sdf", "af", "adsf"};
 ```
 
-编译器看到`{t1, ...,tn}`内部做出一个`initializer_list<T>`。 构造函数有一个版本接受这种形式。
+**编译器看到`{t1, ...,tn}`内部做出一个`initializer_list<T>`。 构造函数有一个版本接受这种形式。**
 **如果构造函数中不接受这种形式，编译器会将`initializer_list<T>`拆解**，一个个丢进构造函数
 
 #### Initializer List
@@ -3235,7 +3630,7 @@ Lambdas相当于一个匿名的**仿函数**，其返回值是一个对象
 
 **语法**：$[...](...) mutable\ throwSpec\ \rightarrow retType \{...\}$
 
-<img src="D:/mygit/notes/images/20220216094150.png" style="zoom: 50%;" />
+<img src="../images/20220216094150.png" style="zoom: 50%;" />
 
 #### `decltype` + `auto`
 
@@ -3291,7 +3686,7 @@ res.push_back(a);
 
 #### 拷贝构造与移动构造
 
-<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220626211510971.png" alt="image-20220626211510971" style="zoom:50%;" />
+<img src="..\images\image-20220626211510971.png" alt="image-20220626211510971" style="zoom:50%;" />
 
 <img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220626211553608.png" alt="image-20220626211553608" style="zoom:50%;" />
 
@@ -3547,7 +3942,7 @@ class test{
 
 创建型模式的主要关注点是“**怎样创建对象？**”，它的主要特点是“**将对象的创建与使用分离**”。这样可以降低系统的耦合度，使用者不需要关注对象的创建细节，对象的创建由相关的工厂来完成。
 
-### 1. 单例模式
+### 1. 单例模式-懒汉模式
 
 > 不可以使用double check的单例模式，因为内存的重排序导致有线程安全问题
 
@@ -3784,6 +4179,234 @@ Facade模式可以为互相关联在一起的错综复杂的类整理出高层AP
 
 ## 8.4. 其他
 
+# 9. 并发库
+
+## std::mutex
+
+
+
+## 互斥量包装器
+
+- **lock_guard**：使用了 RAII 的机制，**构造时加锁**，**析构时解锁**。
+
+  ```cpp
+  #include <mutex>
+  
+  std::mutex mtx;
+  
+  void f()
+  {
+    const std::lock_guard<std::mutex> lock(mtx);
+    // ...
+    // mtx is automatically released when lock goes out of scope
+  }
+  ```
+
+- **scoped_lock**：类似于 lock_guard，但可以管理多个互斥量（可以防止死锁）。
+
+  ```cpp
+  #include <mutex>
+  
+  std::mutex mtx1, mtx2;
+  
+  void f()
+  {
+    const std::scoped_lock<std::mutex, std::mutex> lock(mtx1, mtx2);
+    // ...
+  }
+  ```
+
+- **unique_lock**：类似于 lock_guard，但支持延迟加锁、超时加锁、递归加锁。
+
+  ```cpp
+  #include <mutex>
+  #include <chrono>
+  
+  using namespace std::chrono_literals;
+  
+  std::timed_mutex mtx;
+  
+  // 构造时加锁
+  std::unique_lock<std::timed_mutex> lock(mtx);
+  
+  // 延迟加锁：先不加锁
+  std::unique_lock<std::timed_mutex> lock(mtx, std::defer_lock);
+  
+  lock.lock();
+  bool ok = lock.try_lock();
+  lock.unlock();
+  
+  bool ok = lock.try_lock_for(100ms);
+  
+  auto now = std::chrono::steady_clock::now();
+  bool ok = mtx.try_lock_until(now + 10s);
+  ```
+
+- **shared_lock**：用于管理读写锁中的读者模式（写者模式使用 unique_lock 即可），支持延迟加锁、超时加锁。
+
+  ```cpp
+  #include <mutex>
+  #include <chrono>
+  
+  using namespace std::chrono_literals;
+  
+  std::shared_mutex mtx;
+  
+  // 构造时加锁
+  std::shared_lock<std::shared_mutex> lock(mtx);
+  
+  // 延迟加锁：先不加锁
+  std::shared_lock<std::shared_mutex> lock(mtx, std::defer_lock);
+  
+  lock.lock();
+  bool ok = lock.try_lock();
+  lock.unlock();
+  
+  bool ok = lock.try_lock_for(100ms);
+  
+  auto now = std::chrono::steady_clock::now();
+  bool ok = mtx.try_lock_until(now + 10s);
+  ```
+
+## 条件变量
+
+```cpp
+#include <condition_variable>
+// ①
+void wait (unique_lock<mutex>& lck);
+// ②
+template <class Predicate>
+void wait (unique_lock<mutex>& lck, Predicate pred);
+```
+
+- **condition_variable**：等待时只能使用 `std::unique_lock<std::mutex>`。
+
+  ```cpp
+  std::mutex mtx;
+  std::condition_variable cv;
+  bool ready = false;
+  
+  void worker_thread()
+  {
+    /*
+    等待，直到 ready 为 true，等价于
+    while (!ready)
+    {
+        cv.wait(lock);
+    }
+    */
+    std::unique_lock<std::mutex> lock(mtx);
+    cv.wait(lock, []{return ready;});
+   
+    // after the wait, we own the lock.
+    // ...
+   
+    // 在唤醒之前解锁，以免被唤醒的线程仍阻塞于互斥量
+    lock.unlock();
+    cv.notify_one();
+  }
+  ```
+
+  ```cpp
+  #include <chrono>
+  
+  using namespace std::chrono_literals;
+  
+  std::mutex mtx;
+  std::condition_variable cv;
+  int i;
+  
+  std::unique_lock<std::mutex> lock(mtx);
+  
+  // 超时等待：相对时间
+  if(cv.wait_for(lock, 100ms, []{return i == 1;}))
+  {
+    // 条件满足 ...
+  }
+  
+  // 超时等待：绝对时间
+  auto now = std::chrono::system_clock::now();
+  if(cv.wait_until(lock, now + 100ms, [](){return i == 1;}))
+  {
+    // 条件满足 ...
+  }
+  
+  // 唤醒所有等待线程
+  cv.notify_all();
+  ```
+
+- **condition_variable_any**：与 condition_variable 类似，但可以结合其他锁使用。
+
+## 信号量
+
+```cpp
+#include <semaphore>
+```
+
+- **binary_semaphore**：二元信号量，其实就是计数信号量模板的特化（计数为 1）。
+
+  ```cpp
+  std::binary_semaphore sem;
+  
+  sem.acquire();        // decrements the internal counter or blocks until it can
+  sem.release();        // increments the internal counter and unblocks acquirers
+  
+  book ok = sem.try_acquire();    // tries to decrement the internal counter without blocking
+  
+  // 超时 acquire：相对时间
+  bool ok = sem.try_acquire_for(100ms);
+  
+  // 超时 acquire：绝对时间
+  auto now = std::chrono::system_clock::now();
+  bool ok = sem.try_acquire_until(now + 100ms);
+  ```
+
+  注：`ok` 为 true 表示 acquire 成功。
+
+- **counting_semaphore**：计数信号量，支持的操作同上。
+
+  ```cpp
+  std::counting_semaphore sem(4);
+  ```
+
+## 栅栏
+
+- **latch**：其内部维护着一个计数器，当计数不为 0 时，所有参与者（线程）都将阻塞在等待操作处，计数为 0 时，解除阻塞。计数器不可重置或增加，故它是一次性的，不可重用。
+
+  ```cpp
+  #include <latch>
+  
+  std::latch work_done(4);
+  
+  work_done.count_down();             // decrements the counter in a non-blocking manner
+  work_done.wait();                   // blocks until the counter reaches zero
+  bool ok = work_done.try_wait();     // tests if the internal counter equals zero
+  work_done.arrive_and_wait();        // decrements the counter and blocks until it reaches zero
+  ```
+
+- **barrier**：类似于 latch，它会阻塞线程直到所有参与者线程都到达一个同步点，但它是可重用的。
+  一个 barrier 的生命周期包含多个阶段，每个阶段都定义了一个同步点。一个 barrier 阶段包含：
+
+  - 期望计数（设创建时指定的计数为 n），当期望计数不为 0 时，参与者将阻塞于等待操作处；
+  - 当期望计数为 0 时，会执行创建 barrier 时指定的**阶段完成步骤**，然后解除阻塞所有阻塞于同步点的参与者线程。
+  - 当阶段完成步骤执行完成后，会重置期望计数为 `n - 调用arrive_and_drop()的次数`，然后开始下一个阶段。
+
+  ```cpp
+  #include <barrier>
+  
+  auto on_completion = []() noexcept { 
+    // locking not needed here
+    // ...
+  };
+  
+  std::barrier sync_point(4, on_completion);
+  
+  sync_point.arrive();            // arrives at barrier and decrements the expected count 
+  sync_point.wait();              // blocks at the phase synchronization point until its phase completion step is run
+  sync_point.arrive_and_wait();    // arrives at barrier and decrements the expected count by one, then blocks until current phase completes
+  sync_point.arrive_and_drop();    // decrements both the initial expected count for subsequent phases and the expected count for current phase by one
+  ```
+
 # 其他
 
 ## C/C++程序编译/链接模型
@@ -3795,10 +4418,13 @@ Facade模式可以为互相关联在一起的错综复杂的类整理出高层AP
 “分开处理”衍生概念:
 
 - 定义/声明
+
 - 头文件/源文件
+
 - 翻译单元
   - 源文件 + 相关头文件（直接/间接） - 应忽略的预处理语句
-- 
+  
+  
 
 ### 预处理
 
