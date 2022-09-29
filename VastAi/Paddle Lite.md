@@ -2,7 +2,7 @@
 
 ## 概要
 
-## paddle lite是一组工具，以实现在多端设备（移动端设备、物联网设备等）上运行机器学习模型
+paddle lite是一组工具，以实现在多端设备（移动端设备、物联网设备等）上运行机器学习模型
 
 ## 开发流程
 
@@ -145,5 +145,159 @@ std::unique_ptr<Tensor> out_tensor(std::move(predictor->GetOutput(x)));
 
 ```c++
 auto* output = output_tensor->data<float>();
+```
+
+# NNAdapter
+
+> 飞桨推理 AI 硬件统一适配框架
+
+## 基于NNAdapter的硬件适配实践
+
+### HAL标准接口定义
+
+定义在[Paddle-Lite/lite/backends/nnadapter/nnadapter/include/nnadapter/core/types.h](https://github.com/PaddlePaddle/Paddle-Lite/blob/ede855cb5bf602cbfb3c4e5fb59997f78ec19b81/lite/backends/nnadapter/nnadapter/include/nnadapter/core/types.h)
+
+```c++
+typedef struct Operand {
+  NNAdapterOperandType type;
+  void* buffer;
+  uint32_t length;
+} Operand;
+
+typedef struct Argument {
+  int index;
+  void* memory;
+  void* (*access)(void* memory, NNAdapterOperandType* type);
+} Argument;
+
+typedef struct Operation {
+  NNAdapterOperationType type;
+  std::vector<Operand*> input_operands;
+  std::vector<Operand*> output_operands;
+} Operation;
+
+typedef struct Cache {
+  const char* token;
+  const char* dir;
+  std::vector<NNAdapterOperandType> input_types;
+  std::vector<NNAdapterOperandType> output_types;
+  std::vector<uint8_t> buffer;
+} Cache;
+
+typedef struct Model {
+  std::list<Operand> operands;
+  std::list<Operation> operations;
+  std::vector<Operand*> input_operands;
+  std::vector<Operand*> output_operands;
+} Model;
+```
+
+硬件适配开发需要的实现接口,定义在[Paddle-Lite/lite/backends/nnadapter/nnadapter/include/nnadapter/driver/device.h](https://github.com/PaddlePaddle/Paddle-Lite/blob/ede855cb5bf602cbfb3c4e5fb59997f78ec19b81/lite/backends/nnadapter/nnadapter/include/nnadapter/driver/device.h)
+
+```c++
+typedef struct Device {
+  // Properties
+  const char* name;
+  const char* vendor;
+  NNAdapterDeviceType type;
+  int32_t version;
+  // Interfaces
+  int (*open_device)(void** device);
+  void (*close_device)(void* device);
+  int (*create_context)(void* device, const char* properties, int (*callback)(int event_id, void* user_data), void** context);
+  void (*destroy_context)(void* context);
+  int (*create_program)(void* context, Model* model, Cache* cache, void** program);
+  void (*destroy_program)(void* program);
+  int (*execute_program)(void* program, uint32_t input_count, Argument* input_arguments, uint32_t output_count, Argument* output_arguments);
+} Device;
+```
+
+
+
+### `engine模板代码`
+
+定义在[Paddle-Lite/lite/backends/nnadapter/nnadapter/src/driver/XXX/engine.h]()
+
+```c++
+namespace nnadapter {
+namespace XXX { // 适配硬件的命名空间
+    class Device {
+        public:
+        Device();
+        ~Device();
+    };
+    
+    class Context {
+     public:
+      explicit Context(void* device, const char* properties);
+      ~Context();
+
+     private:
+      void* device_{nullptr};
+
+    };
+
+    class Program {
+     public:
+      explicit Program(Context* context) : context_(context) {}
+      ~Program();
+
+      int Build(core::Model* model, core::Cache* cache);
+      int Execute(uint32_t input_count,
+                  core::Argument* input_arguments,
+                  uint32_t output_count,
+                  core::Argument* output_arguments);
+
+     private:
+      void Clear();
+      int CheckInputsAndOutputs(uint32_t input_count,
+                                core::Argument* input_arguments,
+                                uint32_t output_count,
+                                core::Argument* output_arguments);
+
+     private:
+      Context* context_{nullptr};
+      // Map NNAdapter operand to XXX operator
+      // std::map<core::Operand*, std::vector<std::shared_ptr<Operator>>> operators_;
+
+      std::vector<NNAdapterOperandType> input_types_;
+      std::vector<NNAdapterOperandType> output_types_;
+    };
+
+}    
+}
+```
+
+
+
+### `open_device`
+
+固定写法
+
+```c++
+#include "utility/logging.h"
+int OpenDevice(void** device) {
+    auto d = new Device();
+    if (!d) {
+        *device = nullptr;
+        NNADAPTER_LOG(FATAL) << "Failed to open device for xxx.";
+        return NNADAPTER_OUT_OF_MEMORY;
+  	}
+    *device = reinterpret_cast<void*>(d);
+    return NNADAPTER_NO_ERROR;
+}
+```
+
+### `close_device`
+
+固定写法
+
+```c++
+void CloseDevice(void* device) {
+  if (device) {
+    auto d = reinterpret_cast<Device*>(device);
+    delete d;
+  }
+}
 ```
 
