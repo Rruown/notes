@@ -699,7 +699,7 @@ ssh-keygen -t ras//.ssh目录下生成公钥和私钥
 
 
 
-## 编译及工具
+## 编译及调试工具
 
 ### 静态库的制作
 
@@ -786,21 +786,57 @@ ssh-keygen -t ras//.ssh目录下生成公钥和私钥
 
 ### cmake
 
-#### 基础配置
-
-##### 1. 项目名称及版本(必选)
+cmake**命令使用：**
 
 ```cmake
+cmake -S . -B build # -S 指定编译的源目录 -B 指定build目录
+```
+
+```cmake
+mkdir build && cd build # 创建一个build目录
+cmake .. && make -j$(nproc) # cmake ..将源目录（./build/..）编译放在build目录下， 多线程make -j$(nproc)
+```
+
+#### 基础配置
+
+##### 1 项目名称及版本(必选)
+
+```cmake
+cmake_minimum_required(VERSION 3.0) # 指定cmake的最低支持版本
 project(项目名 version 版本号 language c cxx)
 ```
 
-##### **2 指定编程语言版本**（可选）
+##### **2 CMake变量及环境变量设置**（可选）
 
 `set`为变量和环境变量设置值，语法如下：
 
+> 环境变量是CMake预定义的变量是全局的，普通变量作用范围当前CMakeLists.txt文件
+
 ```cmake
-set(<varible>/ENV{<varible>} <value> <value> ...)
+set(<varible>/ENV{<varible>} <value> <value> ... [PARENT_SCOPE]) # PARENT_SCOPE 向上层返回变量值，这会修改上层变量的值
 ```
+
+*普通变量在**`add_subdirectory()`、`function()`**相当于值传递，可以通过`PARENT_SCOPE`修改值*
+
+*普通变量在**`include()`、`macro()`**类似于预处理，相当于引用传递*
+
+
+
+`set`设置Cache变量：
+
+> Cache 变量相当于一个全局变量，在同一个 cmake 工程中都可以使用
+
+```cmake
+set(<variable> <value>... CACHE <type> <docstring> [FORCE])
+
+# 设置 Cache 变量
+set(MY_GLOBAL_VAR "666" CACHE STRING INTERNAL )
+
+# 修改 Cache 变量
+set(MY_GLOBAL_VAR "777" CACHE STRING INTERNAL FORCE)
+```
+
+
 
 指定编程语言版本：
 
@@ -808,6 +844,22 @@ set(<varible>/ENV{<varible>} <value> <value> ...)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 11)
 ```
+
+指定cmake构建类型：
+
+```cmake
+ set (CMAKE_BUILD_TYPE "Debug") # debug模式
+ set (CMAKE_BUILD_TYPE "Relese") # Release模式
+```
+
+**重要的一些环境变量:**
+
+- `PROJECT_SOURCE_DIR`为包含`PROJECT()`的最近一个`CMakeLists.txt`文件所在的文件夹。
+- `CMAKE_SOURCE_DIR`指顶层的CMakeLists.txt路径
+- `CMAKE_CURRENT_SOUR_DIR`值cmake文件当前的路径
+- `CMAKE_MODULE_PATH`值cmake搜索.cmake脚本的路径
+
+
 
 ##### **3 配置编译选项**（可选）
 
@@ -829,6 +881,14 @@ set(CMAKE_BUILD_TYPE Debug) // 可设置为：Debug、Release、RelWithDebInfo�
 include_directories(src/c)
 ```
 
+**7 添加link目录（可选）**
+
+指定链接器查找库的目录
+
+```cmake
+link_directories(${PADDLE_PATH}/lib)
+```
+
 #### 编译目标文件
 
 一般来说，编译目标(target)的类型一般有静态库、动态库和可执行文件。 这时编写`CMakeLists.txt`主要包括两步：
@@ -836,21 +896,221 @@ include_directories(src/c)
 1. 编译：确定编译目标所需要的源文件
 2. 链接：确定链接的时候需要依赖的额外的库
 
-##### **1 编译静态库**
+**编译target的三种命令**:
 
-```text
-file(GLOB_RECURSE MATH_LIB_SRC // 获取源文件列表
+- `add_executable`: 可执行的目标文件（必须有main函数）
+- `add_library`: 编译静态库、动态库
+- `add_custom_target`
+
+**`add_library`与** **`add_depencies`** **区别:**
+
+- `add_depencies`编译时检查依赖关系，先编译依赖的目标
+
+> 动态库由Linux中的**ld**自动加载，`ldd`查看程序依赖库。**ld**除了从标准路径加载共享库之外，还会从非标准路径（由`LD_LIBRARY_PATH`系统环境变量指定）加载动态库。
+
+##### **1 编译库或添加库路径**
+
+```cmake
+file(GLOB_RECURSE MATH_LIB_SRC # 获取源文件列表
         src/c/math/*.c)
-add_library(math STATIC ${MATH_LIB_SRC}) // 静态链接 SHARED是动态连接
+aux_source_directory (< dir > < variable >) # 将目录下的所有源文件存放在变量中       
 
+add_library(math STATIC ${MATH_LIB_SRC}) # 静态链接 SHARED是动态连接
+
+link_directories(${PADDLE_PATH}/lib) # 指定链接库目录
 ```
 
-##### **2 编译可执行文件**
+##### **2 链接库**
 
-```text
+```cmake
 add_executable(可执行文件名 main.cxx)
 target_link_libraries(可执行文件名 链接库)
 ```
+
+#### 模块管理
+
+> include、find_package和add_subdirectory都可以模块管理，区别在于：
+>
+> （1）include、find_packge方式类似，都是加载.cmake脚本文件。add_subdirectory是添加子目录，加载CMakeLists.txt文件
+>
+> （2）include和find_package的类似于#include宏定义，变量是共享的，而add_subdirectory的子文件是拷贝了一份父文件内的变量，相当于值传递
+
+##### **1 通过CMake内置模块引入依赖包**
+
+> 为了方便在项目中引入外部依赖包，cmake官方预定义了许多寻找依赖包的Module，他们存储在`path_to_your_cmake/share/cmake-<version>/Modules`目录下。每个以`Find<LibaryName>.cmake`命名的文件都可以帮我们找到一个包。在官方文档中可以查看到哪些库官方已经为我们定义好了，我们就可以直接使用find_package函数进行引用[官方文档：Find Modules](https://link.zhihu.com/?target=https%3A//cmake.org/cmake/help/latest/manual/cmake-modules.7.html)。
+
+以curl库为例，假设项目需要引入这个库，从网站中请求网页到本地，官方已经定义好了FindCURL.cmake
+
+```cmake
+find_package(CURL)
+add_executable(curltest curltest.cc)
+if(CURL_FOUND)
+    target_include_directories(clib PRIVATE ${CURL_INCLUDE_DIR})
+    target_link_libraries(curltest ${CURL_LIBRARY})
+else(CURL_FOUND)
+    message(FATAL_ERROR ”CURL library not found”)
+endif(CURL_FOUND)
+```
+
+每一个模块都会预定义以下几个变量：
+
+```
+<LibaryName>_FOUND
+<LibaryName>_INCLUDE_DIR or <LibaryName>_INCLUDES <LibaryName>_LIBRARY or <LibaryName>_LIBRARIES
+```
+
+
+
+##### **2 通过find_package引入非官方的库**
+
+> 该方式只对支持cmake编译安装的库有效
+
+安装方法以glog库为例，之后便可以通过与引入curl库一样的方式引入glog库了
+
+```cmake
+# clone该项目
+git clone https://github.com/google/glog.git 
+# 切换到需要的版本 
+cd glog
+git checkout v0.40  
+
+# 根据官网的指南进行安装
+cmake -H. -Bbuild -G "Unix Makefiles"
+cmake --build build
+cmake --build build --target install
+```
+
+##### **3 Module模式与Config模式**
+
+在Module模式中，cmake需要找到一个叫做`Find<LibraryName>.cmake`的文件。这个文件负责找到库所在的路径，为项目引入头文件路径和库文件路径。cmake搜索这个文件的路径有两个，一个是上文提到的cmake安装目录下的`share/cmake-<version>/Modules`目录，另一个是`CMAKE_MODULE_PATH`指定的目录。
+
+如果Module模式搜索失败，没有找到对应的`Find<LibraryName>.cmake`文件，则转入Config模式进行搜索。它主要通过`<LibraryName>Config.cmake` or `<lower-case-package-name>-config.cmake`这两个文件来引入需要的库。以安装的glog库为例，在安装之后，它在`/usr/local/lib/cmake/glog/`目录下生成了`glog-config.cmake`文件，而`/usr/local/lib/cmake/<LibraryName>/`正是find_package函数的搜索路径之一。
+
+
+
+常见的用法是将.cmake文件的放入`PRJECT_SOURCE_DIR/cmake`文件下，并加入cmake Module的搜索路径
+
+```cmake
+set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake;${CMAKE_MODULE_PATH}")
+add_executable(addtest addtest.cc)
+find_package(ADD)
+if(ADD_FOUND)
+    target_include_directories(addtest PRIVATE ${ADD_INCLUDE_DIR})
+    target_link_libraries(addtest ${ADD_LIBRARY})
+else(ADD_FOUND)
+    message(FATAL_ERROR "ADD library not found")
+endif(ADD_FOUND)
+```
+
+#### 控制流
+
+##### 命令或函数定义
+
+> 参数都是map类型，`options`是<string, bool>映射。oneValueArgs是<string, string>。
+>
+> multiValueArgs是<string, vector<string>>映射
+
+```cmake
+function(test_parse)
+    set( options op1 op2 op3 ) # 设置options可选项， 类型是Bool
+    set( oneValueArgs v1 v2 v3 ) # 设置一个值的参数名
+    set( multiValueArgs m1 m2 )
+    message( STATUS "options = ${options}" )
+    message( STATUS "oneValueArgs = ${oneValueArgs}" )
+    message( STATUS "multiValueArgs = ${multiValueArgs}" )
+    cmake_parse_arguments( MYPRE "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN} )
+    message("op1  = ${MYPRE_op1}")
+    message("op2  = ${MYPRE_op2}")
+    message("op3  = ${MYPRE_op3}")
+
+    message("v1  = ${MYPRE_v1}")
+    message("v2  = ${MYPRE_v2}")
+    message("v3  = ${MYPRE_v3}")
+
+    message("m1  = ${MYPRE_m1}")
+    message("m2  = ${MYPRE_m2}")
+endfunction()
+
+message( STATUS "\n" )
+test_parse( op1 op2 op3 v1 aaa v2 111 v3 bbb m1 1 2 3 4 5 m2 a b c )
+# 输出结果：
+# op1 = TRUE
+# op2 = TRUE
+# op3 = TRUE
+# v1 = aaa
+# v2 = 111
+# v3 = bbb
+# m1 = 1; 2; 3; 4; 5
+# m2 = a; b; c;
+
+message( STATUS "\n" )
+test_parse(op1 op3 v1 aaa v2 111 v3 bbb m1 1 2 3 4 5 m2 a b c )
+# 输出结果：
+# op1 = TRUE
+# op2 = False
+# op3 = TRUE
+# v1 = aaa
+# v2 = 111
+# v3 = bbb
+# m1 = 1; 2; 3; 4; 5
+# m2 = a; b; c;
+
+message( STATUS "\n" )
+test_parse(op1 op3 v1 aaa v2 v3 bbb m1 1 2 3 4 5  )
+# 输出结果：
+# op1 = TRUE
+# op2 = False
+# op3 = TRUE
+# v1 = aaa
+# v2 = 
+# v3 = bbb
+# m1 = 1; 2; 3; 4; 5
+# m2 = 
+
+message( STATUS "\n" )
+test_parse( op1  v1 aaa v2 op2 111 v3 bbb m1 1 2 3 4 5 m2 a b c op3 )
+# 输出结果：
+# op1 = TRUE
+# op2 = TRUE
+# op3 = TRUE
+# v1 = aaa
+# v2 = 
+# v3 = bbb
+# m1 = 1; 2; 3; 4; 5
+# m2 = a; b; c;
+```
+
+
+
+### GDB
+
+## docker
+
+### [命令接口](https://docs.docker.com/engine/reference/commandline/cli/)
+
+#### [docker run](https://docs.docker.com/engine/reference/commandline/run/)
+
+```bash
+ docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+```
+
+`--runtime`指定容器的runtime
+
+`-e,--env,--env-file`设置容器的环境变量
+
+`--name`指定容器的名字
+
+`-it`分配容器的伪tty
+
+`-v， --volume`指定容器挂载点
+
+```bash
+docker -v a:b # 将a目录挂载到容器的b目录
+```
+
+> 解决`docker run`无法启动：
+>
+> - `-itd` 指定伪tty并设置后台运行，避免主线程停止运行从而停止容器
 
 ## 文件描述符
 
@@ -1000,6 +1260,18 @@ int stat(const char *pathname, struct stat *statbuf);
             lseek(fd, offset, SEEK_END)
   */
 ```
+
+
+
+# 开发工具
+
+## git
+
+### Git规范化提交-CZ工具
+
+[Cz工具集使用介绍](https://juejin.cn/post/6844903831893966856)
+
+
 
 
 

@@ -4,6 +4,36 @@
 
 paddle lite是一组工具，以实现在多端设备（移动端设备、物联网设备等）上运行机器学习模型
 
+## docker环境准备
+
+```Bash
+#从 Dockerhub 直接拉取 Docker 镜像
+docker pull paddlepaddle/paddle-lite:2.0.0_beta
+
+#启动容器
+docker run -itd --privileged\
+  --name zxli_paddlelite \
+  -v $PWD/Paddle-Lite:/Paddle-Lite \
+  --net=host \
+  paddlepaddle/paddle-lite:2.0.0_beta /bin/bash
+```
+
+## 源码编译
+
+```Bash
+# 下载 Paddle Lite 源码并切换到发布分支，如 develop
+git clone https://github.com/PaddlePaddle/Paddle-Lite.git
+cd Paddle-Lite && git checkout develop
+# (可选) 删除 third-party 目录，编译脚本会自动从国内 CDN 下载第三方库文件# rm -rf third-party
+./lite/tools/build_linux.sh --arch=x86 --with_extra=ON --with_log=ON --with_exception=ON --with_nnadapter=ON
+
+#./lite/tools/build_linux.sh --arch=x86 --with_extra=ON --with_log=ON --with_exception=ON --with_nnadapter=ON --nnadapter_with_vastai=ON 
+```
+
+## 基础编译参数
+
+Paddle Lite 仓库中`./lite/tools/build_linux.sh`脚本文件用于构建 linux 版本的编译包，通过修改`build_linux.sh`脚本文件中的参数，可满足不同场景编译包的构建需求，常用的基础编译参数如下表所示： 有特殊硬件需求的编译参数见后文。
+
 ## 开发流程
 
 ### 生成paddle lite模型
@@ -149,11 +179,426 @@ std::unique_ptr<Tensor> out_tensor(std::move(predictor->GetOutput(x)));
 auto* output = output_tensor->data<float>();
 ```
 
+## 底层源码
+
+> Paddle Lite 方案架构
+
+<img src="..\images\paddle_lite_with_nnadapter.jpg" alt="Paddle_Lite是实现架构" style="zoom: 80%;" />
+
+### Paddle数据类型
+
+#### Scope
+
+> Scope是一个树形结构，树中每个节点都有一个map记录`变量名->Variable`的映射。
+
+
+
+<img src="..\images\image-20221011112944460.png" alt="image-20221011141726663" style="zoom:80%;" />
+
+**API：**
+
+```c++
+/// 创建一个孩子节点，返回孩子节点
+Scope &Scope::NewScope() const;
+
+/// 查找当前节点的变量
+Variable *Scope::FindLocalVar(const std::string &name) const；
+    
+///向父节点方向查找变量
+Variable *Scope::FindVar(const std::string &name) const；
+
+/** 
+ * 向父节点方向查找变量
+ * 如果找到直接返回
+ * 如果没有找到，在当前节点创建一个新Var返回
+ */
+Variable *Scope::Var(const std::string &name) 
+...
+```
+
+
+
+**在Paddle-Lite中，Scope有两种：**
+
+- `scope_`是根节点的**Scope**，用于存放持久化变量，包括`feed`变量和`fetch`变量。以及模型的权重参数等
+- `exec_scope`是`scope_`的子节点，存放模型计算的中间变量
+
+#### Variable
+
+> 底层数据是`Any`类型，`Variable`能以任意类型的方式读取变量和修改变量
+>
+> [Any](https://dmlc-core.readthedocs.io/en/latest/doxygen/any_8h_source.html)是dml-core中的实现，dml-core是构建机器学习的一组工具包
+>
+> `Any`是一个**容器可以存放任意的数据类型**
+
+**API:**
+
+```c++
+/// 以只读方法读取数据
+template <typename T>
+const T& Get() const；
+
+/// 读写数据
+template <typename T>
+T* GetMutable()；
+
+// 类型判断
+template <typename T>
+bool IsType()；
+```
+
+
+
+#### Tensor
+
+底层是一个`buffer`（void类型数组）
+
+
+
+### Paddle Lite网络结构描述
+
+#### ProgramDesc
+
+一个program由若干个block组成
+
+#### BlockDesc
+
+block由若干个op和var组成
+
+var中存放了op输入输出变量的描述
+
+#### OpDesc
+
+op由输入域和输出域以及类型组成。Op的输入和输出都是key-value格式的map，每个Op不同的实现绑定到不同的key，如`feed_op`输入key是`X`，输出key是`Out`
+
+**成员变量：**
+
+```c++
+// op的类型名
+std::string type_;
+// 输入的变量集合
+std::map<std::string, std::vector<std::string>> inputs_;
+// 输出的变量集合
+std::map<std::string, std::vector<std::string>> outputs_;
+
+// op的属性， k-v存放
+// 如果op有kKernelTypeAttrz属性，则将取出值解析出kernel信息（kernel type、place、alias）
+std::map<std::string, Any> attrs_;
+std::map<std::string, AttrType> attr_types_;
+```
+
+**Op有三个特殊的类型：**
+
+- `while`
+- `conditional_block`
+- `subgraph`
+
+
+
+
+
+#### VarDesc
+
+var由名称和类型组成
+
+
+
+### `PaddlePredictor`
+
+#### Lite API
+
+> [paddle::lite_api::paddle_api.h](https://github.com/PaddlePaddle/Paddle-Lite/blob/develop/lite/api/paddle_api.h)定义了PaddlePredictor的Lite接口，支持多种硬件包括ARM、X86、OpenCL、CUDA等
+
+##### Tensor 
+
+##### PaddlePredictor 
+
+`CreatePaddlePredictor` 根据 `Config` 构建预测器。
+
+> CreatePaddlePredictor有两个特化版本，根据不同的Config实例化不同的Predictor
+>
+> - CxxConfig 实例化 CxxPredictor 定义在
+> - MobileConfig 实例化 LightPredictor
+
+```C++
+template <typename ConfigT>
+std::shared_ptr<PaddlePredictor> CreatePaddlePredictor(const ConfigT&);
+```
+
+##### CxxModelBuffer 
+
+##### CxxConfig->ConfigBase
+
+##### MobileConfig->ConfigBase
+
+### LightPredictor
+
+> 定义实现于[light_api.h](https://github.com/PaddlePaddle/Paddle-Lite/blob/develop/lite/api/light_api.h)、[light_api.cc](https://github.com/PaddlePaddle/Paddle-Lite/blob/develop/lite/api/light_api.cc)、[light_api.impl](https://github.com/PaddlePaddle/Paddle-Lite/blob/develop/lite/api/light_api_impl.cc)
+
+#### `LightPredictor`
+
+**成员变量:**
+
+```C++
+
+std::shared_ptr<Scope> scope_;
+std::unique_ptr<RuntimeProgram> program_;
+/// program描述
+std::shared_ptr<cpp::ProgramDesc> program_desc_;
+
+
+/// 输入名
+std::vector<std::string> input_names_;
+/// 输出名
+std::vector<std::string> output_names_;
+
+
+std::vector<PrecisionType> input_precisions_;
+bool bool_clear_tensor_ = false;
+```
+
+
+
+**公有成员函数:**
+
+```c++
+LightPredictor(const std::string& lite_model_file,
+                 bool model_from_memory = false,
+                 bool use_low_precision = false);
+void Run();
+
+bool TryShrinkMemory();
+
+bool use_low_precision_ = false;
+
+// Get offset-th col of feed inputs.
+Tensor* GetInput(size_t offset);
+// get input by name.
+Tensor* GetInputByName(const std::string& name);
+// get output by name.
+const Tensor* GetOutputByName(const std::string& name);
+// Get offset-th col of fetch outputs.
+const Tensor* GetOutput(size_t offset);
+
+const lite::Tensor* GetTensor(const std::string& name) const;
+
+// get inputnames and get outputnames.
+std::vector<std::string> GetInputNames();
+std::vector<std::string> GetOutputNames();
+
+// get input tensor precision type
+const std::vector<PrecisionType>& GetInputPrecisions() const;
+void PrepareFeedFetch();
+Scope* scope() { return scope_.get(); }
+```
+
+**私有成员函数:**
+
+```c++
+// check if the input tensor precision type is correct.
+// would be called in Run().
+void CheckInputValid();
+
+void Build(const std::string& lite_model_file, bool model_from_memory = false);
+
+void BuildRuntimeProgram(
+    const std::shared_ptr<const cpp::ProgramDesc>& program_desc,
+    bool use_precision_low);
+
+void DequantizeWeight();
+
+void ClearTensorArray(
+    const std::shared_ptr<const cpp::ProgramDesc>& program_desc);
+```
+
+**LightPredictor初始化基本流程**
+
+Build->（1）LoadModelNaiveFromMemory 
+
+​	   （2）BuildRuntimeProgram
+
+​	    (3) PrepareFeedFetch
+
+
+
+**`BuildRuntimeProgram`函数:**
+
+1. 新建scope的子节点`exe_scope`
+
+```c++
+ auto* exe_scope = &scope_->NewScope();
+```
+
+2. `scope_`初始化`feed`和`fetch`变量
+
+```c++
+  scope_->Var("feed")->GetMutable<std::vector<lite::Tensor>>();
+  scope_->Var("fetch")->GetMutable<std::vector<lite::Tensor>>();
+```
+
+3. 将programDesc中的所有**中间变量**放入`exe_scope`中，将**持久化变量**放入`scope_`中
+
+```c++
+auto block_size = program_desc->BlocksSize();
+
+for (size_t block_idx = 0; block_idx < block_size; ++block_idx) {
+    auto block_desc = program_desc->GetBlock<cpp::BlockDesc>(block_idx);
+    auto var_size = block_desc->VarsSize();
+    
+    for (size_t var_idx = 0; var_idx < var_size; ++var_idx) {
+      auto var_desc = block_desc->GetVar<cpp::VarDesc>(var_idx);
+        
+      if (!var_desc->Persistable()) {
+        auto* var = exe_scope->Var(var_desc->Name());
+        ...
+      } else {
+        if (var_desc->Name() == "feed" || var_desc->Name() == "fetch") continue;
+        scope_->Var(var_desc->Name());
+      }
+    }
+    ...
+  }
+```
+
+4. 初始化`RuntimeProgram`
+
+```c++
+ program_.reset(new RuntimeProgram(
+      program_desc, exe_scope, kRootBlockIdx, use_low_precision_));
+```
+
+
+
+
+
+`LightPredictorImpl : PaddlePredictor`
+
+> PaddlePredictor实现层
+
+**成员变量：**
+
+```c++
+ private:
+  std::unique_ptr<lite::LightPredictor> raw_predictor_;
+```
+
+### RuntimeProgram
+
+**成员变量：**
+
+```c++
+std::vector<std::vector<Instruction>> instructions_; // Instruction由Oplite和KernelBase构造
+Scope* exec_scope_{};
+int64_t version_{0};
+```
+
+
+
+#### 构造函数
+
+```c++
+RuntimeProgram::RuntimeProgram(
+    const std::shared_ptr<const cpp::ProgramDesc>& program_desc,// 模型静态图
+    Scope* exec_scope, // 模型运行的中间变量
+    int block_idx, // 运行中的block id
+    bool use_precision_low);
+```
+
+**将block_desc中的OpDesc转换成对应的OpLite实例和KernelBase实例**
+
+- 根据`block id`取出`progra_desc`中的`block_desc`，遍历`block_desc`中的所有`op_desc`
+- 根据`op_desc`的type找到已注册的OpLite**新**实例`op`
+- 当`op_desc`的类型是`while`、`conditional_block`和`subgraph`时，做。。。
+- `op`绑定`op_desc`和`exec_scope`
+- 如果`op_desc`的含有 kKernelTypeAttr 的 attr
+  - 根据此信息是解析出kernel信息（kernel type、place、alias）
+  - 从`op->CreateKernels({place})`实例化kernelBase
+- 如果无 kKernelTypeAttr 的 attr
+  - ARM 编译生成 ARM Kernel
+  - X86 编译生成 X86 Kernel
+
+**将 `OpLite` 实例和 `KernelBase` 实例放入`instruction_`**
+
+#### Run函数
+
+调用instruction->run()
+
+
+
+#### cpp::OpDesc与Kernel关联
+
+##### 注册LiteOP
+
+[lite/core/op_registry.h:255](https://github.com/PaddlePaddle/Paddle-Lite/blob/f8656fd616c9e458c0b9df75804c316bcdfdaf58/lite/core/op_registry.h#L255)
+
+```c++
+// Register an op.
+#define REGISTER_LITE_OP(op_type__, OpClass)                                   \
+  static paddle::lite::OpLiteRegistrar op_type__##__registry(                  \
+      #op_type__, []() {                                                       \
+        return std::unique_ptr<paddle::lite::OpLite>(new OpClass(#op_type__)); \
+      });                                                                      \
+  int touch_op_##op_type__() {                                                 \
+    op_type__##__registry.touch();                                             \
+    OpKernelInfoCollector::Global().AddOp2path(#op_type__, __FILE__);          \
+    return 0;                                                                  \
+  }
+```
+
+如[新增OP](https://paddle-lite.readthedocs.io/zh/develop/develop_guides/add_operation.html)章节中介绍的Argmax的新增与注册
+
+```c++
+REGISTER_LITE_OP(arg_max, paddle::lite::operators::ArgmaxOpLite);
+```
+
+
+
+[创建Op并选择Kernel](https://github.com/PaddlePaddle/Paddle-Lite/blob/f8656fd616c9e458c0b9df75804c316bcdfdaf58/lite/core/program.cc#L300)
+
+
+
+```c++
+ // Create op
+auto op = LiteOpRegistry::Global().Create(op_type);
+```
+
+
+
+### Instruction
+
+**成员变量:**
+
+```c++
+  std::shared_ptr<OpLite> op_; 
+  std::unique_ptr<KernelBase> kernel_;
+  bool is_feed_fetch_op_{false};
+  bool first_epoch_{true};
+  bool has_run_{false};
+```
+
+#### Run函数
+
+```c++
+// 略Profile相关
+
+if (first_epoch_) {
+    first_epoch_ = false;
+    CHECK(op_->CheckShape());
+}
+if (op_->run_once() && has_run_) {
+    return;
+}
+
+op_->InferShape();
+kernel_->Launch();
+has_run_ = true;
+```
+
+
+
 # NNAdapter
 
 > 飞桨推理 AI 硬件统一适配框架
-
-
 
 ## 概要
 
