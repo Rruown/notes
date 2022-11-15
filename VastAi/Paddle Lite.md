@@ -185,6 +185,137 @@ auto* output = output_tensor->data<float>();
 
 <img src="..\images\paddle_lite_with_nnadapter.jpg" alt="Paddle_Lite是实现架构" style="zoom: 80%;" />
 
+### 数据生命周期
+
+#### 表示层
+
+> 从NB文件中反序列化出模型结构program_desc并在scope中初始化变量，包括权重
+
+**数据表示形式：**
+
+- program_desc
+
+- scope
+
+program_desc存储模型结构、变量和参数配置等描述内容
+
+scope中记录变量名到实际变量的映射
+
+
+
+#### 运行时
+
+> 从main_block开始，根据opdesc的type信息生成对应的**OpLite**并找到对应的**Kernel**实现
+
+运行时先调用`OpLite::InferShape`接口推理输出Tensor shape，再调用`kernel::Launch`计算并分配内存
+
+**数据接收方式：**
+
+- `OpLite::Attach`接口绑定op_desc和scope
+
+
+
+**数据表示形式：**
+
+- `Op Param`
+
+Param中是从op_desc和scope解析出的信息等
+
+#### NNadpater层
+
+**数据接收的形式：** `SubgraphParam`
+
+```c++
+struct SubgraphParam : ParamBase {
+  std::vector<std::string> input_names{};
+  std::vector<std::string> output_names{};
+  std::vector<std::string> input_data_names{};
+  std::vector<std::string> output_data_names{};
+  std::vector<float> input_data_scales{};
+  std::vector<float> output_data_scales{};
+  int block_idx{-1};
+  std::shared_ptr<const cpp::ProgramDesc> program_desc{nullptr};
+  Scope* exec_scope{nullptr};
+};
+```
+
+
+
+**属性支持的类型与变量支持的类型:**
+
+> 属性不支持Tensor
+
+算子**属性值**存放在`program_desc`中，用Any类型存储。支持的类型只有数组和几个基本类型
+
+```c++
+enum class OpAttrType {
+  INT = 0,
+  FLOAT = 1,
+  STRING = 2,
+  INTS = 3,
+  FLOATS = 4,
+  STRINGS = 5,
+  BOOLEAN = 6,
+  BOOLEANS = 7,
+  BLOCK = 8,
+  LONG = 9,
+  BLOCKS = 10,
+  LONGS = 11,
+  UNK,
+};
+```
+
+**变量值**存放`Scope`，**变量描述**存放在`program_desc`。在支持的类型，同时支持变量的shape
+
+```c++
+enum class VarDataType {
+  // Pod Types
+  BOOL = 0,
+  INT16,
+  INT32,
+  INT64,
+  FP16,
+  FP32,
+  FP64,
+  // Tensor<size_t> is used in C++.
+  SIZE_T,
+  UINT8,
+  INT8,
+
+  // Other types that may need additional descriptions
+  LOD_TENSOR,
+  SELECTED_ROWS,
+  FEED_MINIBATCH,
+  FETCH_LIST,
+  STEP_SCOPES,
+  LOD_RANK_TABLE,
+  LOD_TENSOR_ARRAY,
+  PLACE_LIST,
+  READER,
+  // Any runtime decided variable type is raw
+  // raw variables should manage their own allocations
+  // in operators like nccl_op
+  RAW,
+  TUPLE
+};
+```
+
+
+
+#### 补充
+
+**持久化参数保存NB:**
+
+- 预测层调用`SaveModelNaive`
+
+- 取出**main_block中满足`IsParamVarDesc`的变量**，其实现如下：
+
+  - ```c++
+    inline bool IsParamVarDesc(const VarDescReadAPI& var) {
+      return var.GetType() == VarDataType::LOD_TENSOR && var.Persistable();
+    }
+    ```
+
 ### Paddle数据类型
 
 #### Scope
@@ -223,6 +354,8 @@ Variable *Scope::Var(const std::string &name)
 - `scope_`是根节点的**Scope**，用于存放持久化变量，包括`feed`变量和`fetch`变量。以及模型的权重参数等
 - `exec_scope`是`scope_`的子节点，存放模型计算的中间变量
 
+
+
 #### Variable
 
 > 底层数据是`Any`类型，`Variable`能以任意类型的方式读取变量和修改变量
@@ -251,7 +384,120 @@ bool IsType()；
 
 #### Tensor
 
-底层是一个`buffer`（void类型数组）
+> 底层是一个`buffer`（一维数组）
+>
+> `dims_`记录Tensor的维度，`Resize`接口只调整`dims_`的值
+>
+> `Tensor`可以在任意设备端存在，比如host、ARM、X86、CUDA等。因此`Tensor`用`TargetType`记录其工作的设备端，根据`TargetType`找到内存分配的函数模板实例
+
+**提供三种访问数据的方式：**
+
+- `data`接口: 返回**指定类型**的**常量指针**
+
+  ```c++
+  // 根据指定类型将buffer中存储的void类型data强转返回
+  template <typename T, typename R = T>
+  const R *data() const{
+     return reinterpret_cast<const R *>(static_cast<char *>(buffer_->data()) +
+                                        offset_);
+  }
+  ```
+
+  > 没有`PrecisionType`的校验
+
+- `mutable_data`接口：**重定buffer**，返回**指定类型**指针。**引起内存分配！！！**
+
+  ```c++
+  // 内存分配大小取决于dims_.production() * sizeof(T)
+  template <typename T, typename R = T>
+  R *mutable_data() {
+      // type_trait得到T的类型
+      precision_ = lite_api::PrecisionTypeTrait<T>::Type(); 
+      memory_size_ = dims_.production() * sizeof(T);
+      // 重定buffer的值
+      buffer_->ResetLazy(target_, memory_size_);
+      return reinterpret_cast<R *>(static_cast<char *>(buffer_->data()) +
+                                   offset_);
+  }
+  
+  template <typename T, typename R = T>
+  R *mutable_data(TargetType target)
+  
+  // 内存分配大小取决于memory_size
+  template <typename T, typename R = T>
+  R *mutable_data(TargetType target, size_t memory_size)
+  
+  void *mutable_data(size_t memory_size);
+  void *mutable_data(TargetType target, size_t memory_size);
+  ```
+
+- `raw_data`接口：直接返回buffer中的data数据
+
+  ```c++
+  void *raw_data() {
+      return static_cast<char *>(
+          (static_cast<char *>(buffer_->data()) + offset_));
+  }
+  const void *raw_data() const
+  ```
+
+  
+
+#### Buffer
+
+> 不同设备端的内存管理，包括但不限于主机端、X86、ARM、CUDA
+
+为了统一不同端分配内存和释放内存的接口，Paddle-Lite提供了`TargetMalloc/TargetFree`接口
+
+```c++
+LITE_API void* TargetMalloc(TargetType target, size_t size);
+
+void LITE_API TargetFree(TargetType target,
+                         void* data,
+                         std::string free_flag = "");
+```
+
+针对不同的`target`实现不同的`malloc/free`，很容易想到**模板特化**。**Paddle Lite**也是如此
+
+```c++
+template <TargetType Target, typename StreamTy = int, typename EventTy = int>
+class TargetWrapper{ 略 }
+
+
+// 针对host端的实现
+template <>
+class TargetWrapper<TARGET(kHost)> {
+  // 没看懂
+  static void* Malloc(size_t size);
+  static void Free(void* ptr);
+}
+```
+
+
+
+
+
+**重定Buffer:**
+
+当target发生变化或内存不足，则释放原有数据，重新申请
+
+```c++
+virtual void ResetLazy(TargetType target, size_t size) {
+    if (target != target_ || space_ < size) {
+      CHECK_EQ(own_data_, true) << "Can not reset unowned buffer.";
+      Free();
+      data_ = TargetMalloc(target, size);
+      target_ = target;
+      space_ = size;
+#ifdef LITE_WITH_OPENCL
+      cl_use_image2d_ = false;
+#endif
+#ifdef LITE_WITH_METAL
+      metal_use_image2d_ = false;
+#endif
+    }
+  }
+```
 
 
 
@@ -287,13 +533,87 @@ std::map<std::string, Any> attrs_;
 std::map<std::string, AttrType> attr_types_;
 ```
 
-**Op有三个特殊的类型：**
+>  **Op有三个特殊的类型：**
+>
+> - `while`
+> - `conditional_block`
+> - `subgraph`
 
-- `while`
-- `conditional_block`
-- `subgraph`
+##### OpDesc属性类型的Type Traits
 
+定义在*/lite/core/model/base/traits.h*
 
+**算子属性的类型：**
+
+```c++
+enum class OpAttrType {
+  INT = 0,
+  FLOAT = 1,
+  STRING = 2,
+  INTS = 3,
+  FLOATS = 4,
+  STRINGS = 5,
+  BOOLEAN = 6,
+  BOOLEANS = 7,
+  BLOCK = 8,
+  LONG = 9,
+  BLOCKS = 10,
+  LONGS = 11,
+  UNK,
+};
+```
+
+**Type Trait模板：**
+
+> 模板参数U的意义？？？？？
+
+```c++
+struct Standard {};
+template <typename T, typename U = Standard>
+struct OpDataTypeTrait;
+```
+
+**Type Trait的模板“偏”特化**
+
+*INT、STRING类型的手写模板特化*
+
+```c++
+template<typename U>
+struct OpDataTypeTrait<int32_t, U> {                  
+    typedef int32_t ET;                                 
+    typedef int32_t RT;                                 
+    static constexpr OpAttrType AT{OpAttrType::INT};     
+    static constexpr const char* ATN{"INT"};              
+ }; 
+
+template<typename U>
+struct OpDataTypeTrait<std::string, U> {                  
+    typedef std::string ET;                                 
+    typedef std::string RT;                                 
+    static constexpr OpAttrType AT{OpAttrType::STRING};     
+    static constexpr const char* ATN{"STRING"};              
+ }; 
+```
+
+**宏定义简化模板偏特化**
+
+```c++
+template <typename T, typename U = Standard>
+struct OpDataTypeTrait;
+
+#define ATTR_TYPE_TRAIT_IMPL(T, type__)                \
+  template <typename U>                                \
+  struct OpDataTypeTrait<type__, U> {                  \
+    typedef type__ ET;                                 \
+    typedef type__ RT;                                 \
+    static constexpr OpAttrType AT{OpAttrType::T};     \
+    static constexpr const char* ATN{#T};              \
+  };                                                   \
+  template <typename U>                                \
+  constexpr OpAttrType OpDataTypeTrait<type__, U>::AT; \
+  template <typename U>                                \
+  constexpr const char* OpDataTypeTrait<type__, U>::ATN;
+```
 
 
 
@@ -592,6 +912,28 @@ if (op_->run_once() && has_run_) {
 op_->InferShape();
 kernel_->Launch();
 has_run_ = true;
+```
+
+### OpLite与KernelLite
+
+#### Subgraph
+
+```c++
+REGISTER_LITE_KERNEL(subgraph,  // Kernel
+                     kNNAdapter, // Target
+                     kAny,// Precision
+                     kNCHW, // Layout
+                     paddle::lite::kernels::nnadapter::SubgraphCompute, // Kernel Class
+                     def) // alias
+    .BindInput("Inputs",
+               {LiteType::GetTensorTy(TARGET(kAny),
+                                      PRECISION(kAny),
+                                      DATALAYOUT(kNCHW))})
+    .BindOutput("Outputs",
+                {LiteType::GetTensorTy(TARGET(kAny),
+                                       PRECISION(kAny),
+                                       DATALAYOUT(kNCHW))})
+    .Finalize();
 ```
 
 

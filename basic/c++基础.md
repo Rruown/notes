@@ -10,8 +10,8 @@
 
 #### **类型限定符**
 
-> `const` 定义类型为常量
-> volatile 定义类型为易变
+> `const` 定义只读变量
+> `volatile` 定义类型为易变
 
 **const对象**——对象不能被修改。直接尝试修改对象内容，编译器报错。
 
@@ -25,21 +25,33 @@
 
 在有 cv 限定符的函数体内，`*this` 有同样的 cv 限定
 
-#### `const T&`
+#### `const`引用
 
-`const T&`的初始化可以是左值也可以是右值。
+> `const`引用接收的**既可以是左值也可以是右值**
+>
+> **引用只能接收左值**
 
 ```c++
 double &dr = 1; // 错误： 需要左值
 const double &cdr {1}; // 正确
 ```
 
-`const T&`初始化的解释可能如下:
+#### 限定返回值
+
+多是修饰返回值是引用类型的情况下，避免返回值被修改。
+
+成员变量引用返回是可读可写的，`const`修饰限定修改
 
 ```c++
-double tmp = double{1}; // 首先创建一个右值的临时变量
-const double &cdr{tmp}; // 然后用临时变量初始化cdr
+struct A{
+  const std::string& getMsg() const { return msg; } 
+    
+private:
+  std::string msg;
+};
 ```
+
+
 
 ### mutable
 
@@ -1306,6 +1318,16 @@ using std::cout;//使用声明
 
 std::cout
 ```
+
+### 枚举类型
+
+从c++11起，支持有作用域枚举的语法
+
+```c++
+enum [class, struct] [名字] [: 底层类型（如int）] { 枚举项=常量表达式, }
+```
+
+
 
 ## 3.7. 类之间的关系
 
@@ -3711,9 +3733,34 @@ decltype<mp>::value_type elem;
 
 ### 6. 右值引用
 
-> 解决不必要的拷贝，但是它实际还是一个引用
->
-> **用于含有指针的面向对象设计，避免重复copy指针内容**
+#### 左右值
+
+**右值**有三类：
+
+- 常量
+- **只读变量**
+- **临时变量**，函数返回值通常是一个临时变量，只被用作拷贝
+
+#### 左值引用与右值引用
+
+左值引用只能引用左值
+
+```c++
+int a = 1;
+int &alias = a;
+// int &alias = 1; 错误
+```
+
+右值引用能引用右值，可以接管临时变量的生命周期。当接管的右值是常量时等价于普通变量
+
+```c++
+ClassA &&alias = ClassA(); // 一次对象构造
+ClassA alias = ClassA();// 对象构造、拷贝构造
+```
+
+#### 避免不必要拷贝
+
+> 右值引用一般可以**用于含有指针的面向对象设计，避免重复copy指针内容**
 
 比如vector、string
 
@@ -3732,7 +3779,7 @@ res.push_back(a);
 
 <img src="..\images\image-20220626211510971.png" alt="image-20220626211510971" style="zoom:50%;" />
 
-<img src="C:\Users\zhuang\AppData\Roaming\Typora\typora-user-images\image-20220626211553608.png" alt="image-20220626211553608" style="zoom:50%;" />
+<img src=".\image-20220626211553608.png" alt="image-20220626211553608" style="zoom:50%;" />
 
 #### 拷贝赋值与移动赋值
 
