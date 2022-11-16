@@ -54,6 +54,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pipe -std=c++11")
 
 ```cmake
 set(<variable> <value>... [PARENT_SCOPE]) # PARENT_SCOPE选项指定是否将当前变量返回到父文件
+
 set(MY_LIB_PATH ${CMAKE_CURRENT_BIN_DIR}/xxxx)
 ```
 
@@ -162,7 +163,7 @@ add_library(<name> INTERFACE [<source>...] [EXCLUDE_FROM_ALL])
 
 **（3）导入库目标**
 
-> 导入库目标不需要构建，相比`link_directories`，能够方便地配置属性选项,一般配合`set_property`使用
+> 导入库目标不需要构建，相比`link_directories`，不仅能有依赖关系，还能够方便地配置属性选项,一般配合`set_property`使用
 
 ```cmake
 add_library(<name> [STATIC | SHARED | MODULE | UNKNOWN] IMPORTED [GLOBAL])
@@ -232,7 +233,7 @@ add_executable(test m1.cc m2.cc main.cc)
 
 
 
-**（2）可执行目标链接库**
+**（2）可执行目标链接目标库**
 
 ```cmake
 target_link_libraries(<target>
