@@ -1,0 +1,185 @@
+{
+  "main": {
+    "id": "3c9c22a1e4e9a1dc",
+    "type": "split",
+    "children": [
+      {
+        "id": "0e0741fbfa5094b7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "4ac98268e80e47ee",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "basic/C++工具.md",
+                "mode": "source",
+                "source": false
+              }
+            }
+          },
+          {
+            "id": "1b1632e383904eab",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "basic/C++工具.md",
+                "mode": "source",
+                "source": false
+              }
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "dbf0412672ce1cfc",
+    "type": "split",
+    "children": [
+      {
+        "id": "110f77f0ba8962a6",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "06d68f9d86fd4db8",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical"
+              }
+            }
+          },
+          {
+            "id": "0c22995e8cb546c7",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "tag:#Eigen",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": true,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              }
+            }
+          },
+          {
+            "id": "2ffda9cdc54648bc",
+            "type": "leaf",
+            "state": {
+              "type": "starred",
+              "state": {}
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 200
+  },
+  "right": {
+    "id": "f631a719fa65c349",
+    "type": "split",
+    "children": [
+      {
+        "id": "b641476a8dd83013",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "0a123ed1910017ee",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "basic/C++工具.md",
+                "collapseAll": true,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              }
+            }
+          },
+          {
+            "id": "8153403c9ae62641",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "basic/C++工具.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              }
+            }
+          },
+          {
+            "id": "56f59dfdfa0a3f5d",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true
+              }
+            }
+          },
+          {
+            "id": "12a1f12c1cb85058",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "basic/C++工具.md"
+              }
+            }
+          }
+        ],
+        "currentTab": 3
+      }
+    ],
+    "direction": "horizontal",
+    "width": 398.5
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false
+    }
+  },
+  "active": "1b1632e383904eab",
+  "lastOpenFiles": [
+    "VastAi/GStreamer.md",
+    "advance/模板元编程.md",
+    "advance/Python进阶.md",
+    "basic/C++工具.md",
+    "算法.md",
+    "VastAi/Paddle Lite.md",
+    "basic/C++进阶.md",
+    "basic/八股文.md",
+    "未命名.canvas",
+    "面经总结.md",
+    "basic/Linux高性能服务器编程.md",
+    "basic/c++基础.md",
+    "basic/软件理论基础.md",
+    "2023-03-01.md",
+    "pages/contents.md",
+    "basic/并发编程.md",
+    "未命名 1.canvas",
+    "basic/Shell编程.md",
+    "advance/C++进阶.md",
+    "practice/python.md"
+  ]
+}
