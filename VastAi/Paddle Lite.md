@@ -9,62 +9,39 @@
 计算图的构建与运算是同时发生的（define by run）。在系统中，不需要先描述整个计算图的结构，再提供计算数据，而是一开始就计算数据进行相关操作。
 
 **优点：**
-
 -   模型的构建与调试方便
-    
 
 **缺点：**
-
 -   缺少对模型整体结构的认知，无法做一些优化
-    
 
 ### 静态图
 
 计算图的构建与运算是分开发生的（define and run）。先构建好运算流程（计算图），在下次运算时就不需要再次构建图。
 
 **优点：**
-
 -   对图进行等价变化，做优化处理
-    
 
 **缺点：**
-
 -   优化后的图可能导致中间结果不复存在，不便于调试
-    
 
 ## 中间表达
 
 中间表示（IR）是从源到目标的转换过程中一个中间形式
-
 ![](https://vastaitech.feishu.cn/space/api/box/stream/download/asynccode/?code=Y2JkMzBkZGM0NWM4YTIzNDg2NDZhMjA2M2RhN2NiNjFfT1JzeFpEN1pVQkFreFBTNnJWTVY3OXVzb3ZncVJDYWVfVG9rZW46Ym94Y25xVkRqZWk2cTBwMzVjd1MxTUx6cEIyXzE2NzgwOTYzMTY6MTY3ODA5OTkxNl9WNA)![](https://vastaitech.feishu.cn/space/api/box/stream/download/asynccode/?code=NzEyNmRlOGM1YTUxNTVkMDgwYzUyYzJlOTAwYmQwYzRfN2hhSVNUbncxVVdSckJHdGt4VkR0bHpQSExQR2tISTdfVG9rZW46Ym94Y24xWWkzMWdXQUlvbWxBTGJBcU1QNTNmXzE2NzgwOTYzMTY6MTY3ODA5OTkxNl9WNA)
-
-设计一个跨多平台多门语言集合的编译器的复杂度是$$$$N\times M $$$$，而有了中间表示的复杂度是$$$$N+M $$$$
-
-  
+设计一个跨多平台多门语言集合的编译器的复杂度是$N\times M$，而有了中间表示的复杂度是$N+M$
 
 ### 特点
-
 1.  降低前端语言与后端对接的复杂度
-    
-
-  
 
 **抽象层次**
 
 中间表达一般采用三层抽象
 
 ### 中间表达类型
-
 1.  **图IR**
-    
 2.  线性IR
-    
 3.  混合IR
-    
 
-  
-
-  
 
 # 基础实践
 
@@ -121,7 +98,7 @@ paddle_lite_opt --model_dir=./mobilenet_v1 \   // 模型路径
 
 Paddle Lite API库可以通过[官方预测库下载（支持Android/iOS/x86/macOS 平台）](https://paddle-lite.readthedocs.io/zh/latest/quick_start/release_lib.html)、[Docker开发环境编译](https://paddle-lite.readthedocs.io/zh/develop/source_compile/docker_env.html)获得
 
-#### **1. 配置参数**
+#### 1. 配置参数
 
 ##### `CXXConfig`
 
@@ -241,46 +218,117 @@ auto* output = output_tensor->data<float>();
 
 # 架构设计
 
-重点在于**多硬件**、**高性能**的支持，主要设计思想如下：
+**Paddle Lite 动机：**
+对于移动终端和IoT设备，由于硬件资源限制，云侧的模型和推理框架体积太大，无法直接部署，因此**模型的压缩（优化）和推理框架的轻量化**成为移动终端和IoT设备上部署的关键。
 
+Paddle Lite 提供面向端侧的模型部署与轻量化推理框架。重点在于**多硬件**、**高性能**的支持，主要设计思想如下：
 -   引入**类型系统**，强化多硬件、量化方法、data layout 的混合调度能力
-    
 -   硬件细节隔离，通过不同编译开关，对支持的任何硬件可以自由插拔
-    
--   引入 MIR(Machine IR) 的概念，强化带执行环境下的优化支持
-    
--   优化期和执行期严格隔离，保证预测时轻量和高效率
-    
+-   引入 MIR(Machine IR) 的概念，强化**带执行环境**下的优化支持
+-   优化期和执行期严格隔离，保证预测时轻量化和高效率
 
-![](https://vastaitech.feishu.cn/space/api/box/stream/download/asynccode/?code=Y2Q0Y2MzNGI2NTllN2I4OTBlOWI3ODdjODdiMTE0MDBfaG9xakpIeTM5UnpKbzA0NmlvOEFSUnRCQzhrMFdLdWVfVG9rZW46Ym94Y25veTBOQWZSWGViOEFlYlhHWFVuSFpkXzE2NzgwOTYzMTY6MTY3ODA5OTkxNl9WNA)
+![[Pasted image 20230307105134.png]]
 
-芯片种类繁多（ARM、X86、GPU、FPGA等），AI框架的主要技术特点是：
+## 分析期和执行期严格隔离设计
 
--   **多硬件支持**
-    
--   **高性能**
-    
+**保证预测时（推理）轻量和高效率**
+-   分析期优化完毕可以将优化信息存储到模型中；执行期载入并执行
+-   两套 API 及对应的预测lib，满足不同场景
+    -   `CxxPredictor` 打包了分析阶段和执行阶段，可以在运行时在具体硬件上做分析和优化，得到最优效果
+    -   `LitePredictor` 只打包执行阶段，保持部署和执行的轻量
 
-  
+### 分析期
+
+**载入模型并构建计算图：**
+-   载入Paddle模型（**第一层IR**）
+-   按照如下规则将每个Block生成计算图（**第二层IR**）：每个算子或变量都对应计算图的一个节点，节点间的有向边由算子的输入、输出决定（依赖关系确定边的方向），算子节点与变量节点相邻。
+
+**计算图分析与优化：** 将一系列 pass （优化器，用于描述一个计算图变换得到另一个计算图的处理过程）按照一定的顺序依次应用到每个块对应的计算图的过程，包括**量化信息处理**、算子融合、 **Kernel 选择**、类型转化、**上下文创建**、**内存复用优化**和**子图检测**等，实现不同设备的适配、高效的计算和更少的内存占用。
+
+
+### 执行期的轻量级设计和实现
+
+每个 batch 实际执行只包含两个步骤执行：
+	-   `Op.InferShape`
+    -   `Kernel.Run`，Kernel 相关参数均使用指针提前确定，后续无查找或传参消耗
+    -   设计目标，执行时，只有 kernel 计算本身消耗
+
+轻量级 `Op` 及 `Kernel` 设计，避免框架额外消耗：
+    -   `Op` 只有 `CreateKernels` 和 `InferShape` 两个重要职能
+    -   `Kernel` 只有 `Run` 职能
+
+## 多硬件后端支持
+
+-   硬件通用行为，使用 `TargetWrapper` 模块做适配器适配，对上层框架提供一致界面
+-   框架上层策略保持硬件无关，如存储优化 (Memory optimize)，计算剪枝 (Computation prune) 等，任何硬件接入均可直接复用
+-   框架支持了硬件通用行为，特定硬件细节不做过多约束，各硬件可以自行实现并接入框架
+-   计算模式上目前支持两种主流模型，一种是类似 X86, ARM CPU 等非异构设备；一种是 GPU，或 FPGA 等异构设备（支持 stream, event异步执行模式以及跨设备拷贝）
+
+---
+## 多硬件及算法混合调度支持
+
+`TensorTy` 用来表示 Tensor 类型
+
+```C++
+struct TensorTy {
+    TargetType target;
+    PrecisionType precision;
+    DataLayout layout;
+    int deviceid;
+};
+```
+
+```C++
+enum class TargetType { kARM, kX86, kCUDA, kOpenCL };
+enum class PrecisionType { kFP32, kFP16, kInt8, kInt16 };
+enum class DataLayout { kNCHW, kNHWC };
+```
+
+注册 Kernel，确定特定 Kernel 的输入输出特征
+
+```C++
+REGISTER_LITE_KERNEL(
+  mul, kARM, kFloat, kNCHW, arm::MulCompute, def)
+  .BindInput("X", {LiteType::GetTensorTy(kARM, kFloat, kNCHW)})
+  .BindInput("Y", {LiteType::GetTensorTy(kARM, kFloat, kNCHW))})
+  .BindOutput("Out", {LiteType::GetTensorTy(kARM, kFloat, kNCHW)})
+  .Finalize();
+```
+
+同一个 Op 的不同 Kernel 类似函数重载
+
+用于支持任意的混合调度：
+1.  标记模型中所有 tensor 的 Type
+2.  标记 Kernel 的 硬件、执行精度、data layout 等信息
+
+全局做类型推断，当发现 tensor 传递中有类型冲突，采用 type cast 操作，通过插入特定功能 Op 来实现正确的传导
+
+![[Pasted image 20230307110928.png]]
+
+---
+## #MIR 用于图分析优化
+
+基于 Type System 的 SSA，通过 IR Pass 对计算图进行分析和优化：
+-   支持对整个 graph 进行类型推断，发现类型冲突并加入 type cast op，来支持通用混合调度
+-   计算剪枝 (Compute prune)，比如去掉 scale(1), assign op 等
+-   存储优化 (Memory optimize)
+-   操作熔合 (Operator fuse)（已经支持 fc, conv_bn, ele_add+act 等6种 fuse 策略）
+-   支持量化处理（已支持 Int8预测）
+
+
+# 源码分析
 
 ## 类型系统
-
 > 强化多硬件、量化方法、data layout 的混合调度能力
 
 Lite框架使用`Type`类定义框架下所有类型——算子或Kernel的输入和输出。
-
-简单来说，Lite框架的类型是一个五元组$$$$(DataType, Target, Precision, DataLayout, Device) $$$$
+简单来说，Lite框架的类型是一个五元组$(DataType, Target, Precision, DataLayout, Device)$
 
 -   `DataType`：算子或Kernel输入输出的数据载体，可以是`void`表示为止类型、`Tensor`表示Tensor类型、`Unsupported`表示不支持的类型等
-    
 -   `Target`
-    
 -   `Precisioin`：表示数据的精准度，如float, double等
-    
 -   `DataLaylout`：表示数据布局，如NCHW等
-    
 -   `Device`
-    
 
 不同类型之间可以通过一些特殊的算子转换，比如_DataLayoutTransformOp_能够将_`TensorFp32NCHWTy`_ _to a_ _`TensorFp32NHWCTy`__。_
 
@@ -288,11 +336,8 @@ Lite框架使用`Type`类定义框架下所有类型——算子或Kernel的输�
 
 ###   Lite框架的Type类
 
-1.  ####     DataTye类
-    
-
+#### 1. DataTye类
     `Void`数据类型代表任意类型
-
     `Unsupported`：没有被注册的类型都会标记为`Unsupported`，它不会被系统处理，以避免未定义的行为或bug
 
 ```C++
@@ -329,9 +374,7 @@ class DataType {
 };
 ```
 
-2.  ####     Type类
-    
-
+#### 2. Type类
     `GetTensorTy`、`GetTensorListTy`、`GetStepScopeTy`等功能是：根据所给的Place生成特定数据类型的Type
 
 ```C++
@@ -394,10 +437,8 @@ class Type : public DataType {
 };
 ```
 
-3.  ####     兼容性检查
-    
-
-    检查五元组之间的兼容性，跟领域相关略
+#### 3. 兼容性检查
+检查五元组之间的兼容性，跟领域相关略
 
 ```C++
 static bool TargetCompatibleTo(const Type& a, const Type& b) {
@@ -466,61 +507,7 @@ static bool TypeCompatible(const Type& a, const Type& b) {
 }
 ```
 
-4.  ####     Kernel参数类型
-    
-
-  
-
-## 技术特点
-
-### 多硬件支持
-
-Paddle Lite是移动端框架，移动端设备多元化
-
-多种硬件的 Kernel 在代码层和执行层均互不干扰，用户可以自由插拔任何硬件的支持。
-
-### 高性能
-
-### 量化支持
-
-Lite 支持Paddle Slim 强大的量化训练完毕的模型，因此完整保留了量化计算的高性能以及量化训练的高精度。
-
-### 图分析与优化
-
-Paddle Lite架构包含**IR**及**Pass集合**以实现计算图优化，包括算子融合、计算剪枝、存储优化、量化计算等
-
-### 轻量级部署
-
-Lite框架支持图分析及优化阶段和执行阶段分离，实现移动端轻量级部署
-
-### 可支持任意硬件的混合调度
-
-Lite架构通过从底层支持 `Type system` 的方式通用建模各类混合执行的行为，从而能够相对完备地支持混调。
-
-## 架构设计
-
-### 分析阶段与执行阶段隔离
-
-保证预测时（推理）轻量和高效率
-
-#### 分析阶段
-
-**载入模型并构建计算图：**
-
--   载入Paddle模型（**第一层IR**）
-    
--   按照如下规则将每个Block生成计算图（**第二层IR**）：_每个算子或变量都对应计算图的一个节点，节点间的有向边由算子的输入、输出决定（依赖关系确定边的方向），算子节点与变量节点相邻。_
-    
-
-**计算图分析与优化：**
-
-将一系列 pass （优化器，用于描述一个计算图变换得到另一个计算图的处理过程）按照一定的顺序依次应用到每个块对应的计算图的过程，包括**量化信息处理**、算子融合、 **Kernel 选择**、类型转化、**上下文创建**、**内存复用优化**和**子图检测**等，实现不同设备的适配、高效的计算和更少的内存占用。
-
-#### 执行阶段
-
-  
-
-# 源码分析
+#### 4. Kernel参数类型
 
 ## 数据生命周期
 
@@ -879,27 +866,18 @@ virtual void ResetLazy(TargetType target, size_t size) {
   }
 ```
 
-## 技术关键
+## 核心设计
 
-  Lite框架里的 Op 与 Kernel 的设计采用了“**桥接模式**”。抽象部分是 OpLite 、具体部分是 KernelLite 。
+  Lite框架里的 Op 与 Kernel 的设计采用了“**桥接模式**”。抽象部分是 OpLite 、具体部分是 KernelLite
 
 ![](https://vastaitech.feishu.cn/space/api/box/stream/download/asynccode/?code=ZmM3NGE0Yzg5YjAwNzg4YWYyZmUxM2Y4NGMyMDBhNzZfeXQya0ZnTlJDTWU4QzA3ajlhRWJERkRPOVJDbnFacG5fVG9rZW46Ym94Y25yNU90dlpFckVmQ0VrOG8xUXEzb2xnXzE2NzgwOTYzMTY6MTY3ODA5OTkxNl9WNA)
-
-1.  ###   Op
-    
-
+### 1. Op
   设计理念
-
 -   持有算子参数和一些计算资源：`op_info`和`scope`
-    
 -   应该类似于函数调用，不应该拥有太多的：
-    
 
-2.  ###   Kernel
-    
-
+### 2. Kernel
 -   统一不同平台的Kernel实现
-    
 
 ## 网络拓扑描述（IR）
 

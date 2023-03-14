@@ -3,13 +3,10 @@
 ## CMake
 
 ### 资料
-
 [《CMake菜谱》](https://www.bookstack.cn/read/CMake-Cookbook/README.md)
-
 [《CMake官方文档》](https://cmake.org/cmake/help/latest/index.html)
 
 ### 基础构建
-
 > []括号内的是选项，用大写字符表示，可以视作“ON”或“OFF”的布尔类型
 > <>尖括号内的是变量
 
@@ -81,34 +78,27 @@ set(workspace "/tmp/xxxx" CACHE PATH "this is my workspace" FORCE)
 `<docstring>`类似于注释
 
 `type`类型有:
-
 -   `BOOL`
-    
 -   `FILEPATH`：文件路径
-    
 -   `PATH`：目录
-    
 -   `STRING`：文本
-    
 -   `INTERNAL`：文本
-    
 
 **（3）设置环境变量**
-
 > 设置CMAKE预设的环境变量**配置**编译选项
 
 指定语言标准
 
-```Plaintext
+```cmake
 set(CMAKE_CXX_STANDARD 14) # C++14
 set(CMAKE_C_STANDARD 98) # C 98
 ```
 
 指定构建类型
 
-```Plaintext
-set(CMAKE_BUILD_TYPE "Debug") # debug模式
-set(CMAKE_BUILD_TYPE "Relese") # Release模式
+```cmake
+set(CMAKE_BUILD_TYPE Debug) # debug模式
+set(CMAKE_BUILD_TYPE Relese) # Release模式
 ```
 
 **4.重要的环境变量**
@@ -272,7 +262,12 @@ cmake .. && make -j$(nproc) # 多线程编译
 
 #### ExternalProject
 
-`ExternalProject_Add`的选项用于外部项目源的配置和编译、安装等所有方面，可以分成如下几类：
+`ExternalProject_Add`模块允许 CMake 在构建过程中**自动下载**、**编译**和**安装**第三方库
+`EP_BASE`变量用于指定第三方库的默认下载路径，如果未指定默认下载到`${CMAKE_BINARY_DIR}/_deps` 目录
+```CMake
+set_property(DIRECTORY PROPERTY EP_BASE ${CMAKE_BINARY_DIR}/subprojects)
+```
+
 
 -   **Directory**
     
