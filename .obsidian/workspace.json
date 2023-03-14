@@ -13,13 +13,26 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "basic/C++工具.md",
+                "file": "material/c++/cmake/README.md",
+                "mode": "source",
+                "source": false
+              }
+            }
+          },
+          {
+            "id": "f36cc95d04b1157e",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "progoramming/c++/guidelinie/C++ 核心指导.md",
                 "mode": "source",
                 "source": false
               }
             }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "vertical"
@@ -69,8 +82,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 200,
-    "collapsed": true
+    "width": 200
   },
   "right": {
     "id": "f631a719fa65c349",
@@ -86,7 +98,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "basic/C++工具.md",
+                "file": "progoramming/c++/guidelinie/C++ 核心指导.md",
                 "collapseAll": true,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -103,7 +115,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "basic/C++工具.md",
+                "file": "progoramming/c++/guidelinie/C++ 核心指导.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               }
@@ -126,7 +138,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "basic/C++工具.md"
+                "file": "progoramming/c++/guidelinie/C++ 核心指导.md"
               }
             }
           }
@@ -148,10 +160,18 @@
       "command-palette:打开命令面板": false
     }
   },
-  "active": "8f7879f180a58eab",
+  "active": "f36cc95d04b1157e",
   "lastOpenFiles": [
+    "material/c++/cmake/README.md",
+    "progoramming/c++/guidelinie/C++ 核心指导.md",
+    "progoramming/c++/guidelinie",
+    "progoramming/c++",
+    "未命名",
+    "progoramming",
     "basic/C++进阶.md",
     "advance/C++进阶.md",
+    "basic/c++基础.md",
+    "basic/C++工具.md",
     "advance/Python进阶.md",
     "VastAi/Paddle Lite.md",
     "basic/Shell编程.md",
@@ -163,11 +183,9 @@
     "Pasted image 20230307104848.png.md",
     "Pasted image 20230307104848.png",
     "basic/八股文.md",
-    "basic/C++工具.md",
     "VastAi/GStreamer.md",
     "advance/模板元编程.md",
     "未命名.canvas",
-    "basic/c++基础.md",
     "basic/软件理论基础.md",
     "2023-03-01.md",
     "pages/contents.md",
